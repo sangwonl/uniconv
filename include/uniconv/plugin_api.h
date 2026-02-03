@@ -135,6 +135,14 @@ extern "C"
      */
 
     /**
+     * Initialize the plugin (optional)
+     * Called once after the plugin is loaded, before any other calls.
+     * Use this to initialize libraries (e.g., VIPS_INIT, av_register_all).
+     * Returns: 0 on success, non-zero on failure
+     */
+    typedef int (*UniconvPluginInitFunc)(void);
+
+    /**
      * Get plugin information
      * Called once when plugin is loaded
      * Returns: Pointer to static PluginInfo (do not free)
@@ -155,6 +163,7 @@ extern "C"
     typedef void (*UniconvPluginFreeResultFunc)(UniconvResult *result);
 
 /* Function names that plugins must export */
+#define UNICONV_PLUGIN_INIT_FUNC "uniconv_plugin_init"
 #define UNICONV_PLUGIN_INFO_FUNC "uniconv_plugin_info"
 #define UNICONV_PLUGIN_EXECUTE_FUNC "uniconv_plugin_execute"
 #define UNICONV_PLUGIN_FREE_RESULT_FUNC "uniconv_plugin_free_result"

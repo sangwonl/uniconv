@@ -358,6 +358,18 @@ namespace uniconv::core
             return nullptr;
         }
 
+        // Call optional init function
+        void *init_func = get_symbol(handle, UNICONV_PLUGIN_INIT_FUNC);
+        if (init_func)
+        {
+            auto init_fn = reinterpret_cast<UniconvPluginInitFunc>(init_func);
+            if (init_fn() != 0)
+            {
+                unload_library(handle);
+                return nullptr;
+            }
+        }
+
         // Get required symbols
         void *info_func = get_symbol(handle, UNICONV_PLUGIN_INFO_FUNC);
         void *execute_func = get_symbol(handle, UNICONV_PLUGIN_EXECUTE_FUNC);
