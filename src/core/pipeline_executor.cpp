@@ -62,6 +62,7 @@ PipelineResult PipelineExecutor::execute(
             stage_idx,
             stage,
             current_inputs,
+            pipeline.source,
             pipeline.core_options,
             progress,
             is_last_stage
@@ -102,6 +103,7 @@ PipelineExecutor::StageExecutionResult PipelineExecutor::execute_stage(
     size_t stage_index,
     const PipelineStage& stage,
     const std::vector<std::filesystem::path>& inputs,
+    const std::filesystem::path& original_source,
     const CoreOptions& core_options,
     const PipelineProgressCallback& progress,
     bool is_last_stage) {
@@ -151,8 +153,12 @@ PipelineExecutor::StageExecutionResult PipelineExecutor::execute_stage(
             }
 
             if (is_directory) {
-                // Directory specified: use input filename + target extension
-                output_path = out_path / input.stem();
+                // Directory specified: use original source filename + transform suffix + target extension
+                output_path = out_path / original_source.stem();
+                std::string transform = extract_transform_from_temp(input);
+                if (!transform.empty()) {
+                    output_path += "_" + transform;
+                }
                 output_path += "." + element.target;
             } else if (out_path.has_extension()) {
                 // Has extension: use as-is
@@ -163,8 +169,8 @@ PipelineExecutor::StageExecutionResult PipelineExecutor::execute_stage(
                 output_path += "." + element.target;
             }
         } else if (is_last_stage) {
-            // Last stage: output to current directory (same name, new extension)
-            output_path = generate_final_output_path(input, element.target);
+            // Last stage: output to current directory (use original source name + transform suffix)
+            output_path = generate_final_output_path(original_source, input, element.target);
         } else {
             // Intermediate result: use temp directory
             output_path = generate_temp_path(
@@ -275,14 +281,49 @@ std::filesystem::path PipelineExecutor::generate_temp_path(
     return temp_dir_ / filename.str();
 }
 
+std::string PipelineExecutor::extract_transform_from_temp(
+    const std::filesystem::path& temp_path) {
+
+    // Pattern: stage{N}_elem{M}_{target}_{stem}.tmp
+    // We want to extract {target}
+    std::string stem = temp_path.stem().string();
+
+    // Check for temp file pattern: starts with "stage" followed by digits
+    if (stem.substr(0, 5) != "stage") {
+        return "";
+    }
+
+    // Find positions: stage{N}_elem{M}_{target}_{rest}
+    // Skip "stage{N}_elem{M}_" prefix to find the transform
+    size_t first_underscore = stem.find('_');
+    if (first_underscore == std::string::npos) return "";
+
+    size_t second_underscore = stem.find('_', first_underscore + 1);
+    if (second_underscore == std::string::npos) return "";
+
+    size_t third_underscore = stem.find('_', second_underscore + 1);
+    if (third_underscore == std::string::npos) return "";
+
+    // Extract transform (between second and third underscore)
+    return stem.substr(second_underscore + 1, third_underscore - second_underscore - 1);
+}
+
 std::filesystem::path PipelineExecutor::generate_final_output_path(
-    const std::filesystem::path& input,
+    const std::filesystem::path& original_source,
+    const std::filesystem::path& intermediate_input,
     const std::string& target) {
 
-    // Output to current directory with input stem + target as extension
-    // e.g., photo.heic → photo.jpg (when target is "jpg")
+    // Output to current directory
+    // Format: {original_stem}_{transform}.{target} if transform exists
+    //         {original_stem}.{target} otherwise
     std::filesystem::path output = std::filesystem::current_path();
-    output /= input.stem();
+
+    std::string transform = extract_transform_from_temp(intermediate_input);
+
+    output /= original_source.stem();
+    if (!transform.empty()) {
+        output += "_" + transform;
+    }
     output += "." + target;
 
     return output;

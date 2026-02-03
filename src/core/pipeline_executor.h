@@ -37,6 +37,7 @@ private:
         size_t stage_index,
         const PipelineStage& stage,
         const std::vector<std::filesystem::path>& inputs,
+        const std::filesystem::path& original_source,
         const CoreOptions& core_options,
         const PipelineProgressCallback& progress,
         bool is_last_stage
@@ -60,10 +61,16 @@ private:
     );
 
     // Generate final output path (current directory)
+    // Uses original_source for base name, extracts transform from intermediate input if present
     std::filesystem::path generate_final_output_path(
-        const std::filesystem::path& input,
+        const std::filesystem::path& original_source,
+        const std::filesystem::path& intermediate_input,
         const std::string& target
     );
+
+    // Extract transform name from intermediate temp filename
+    // Returns empty string if not a temp file pattern
+    std::string extract_transform_from_temp(const std::filesystem::path& temp_path);
 
     // Cleanup temp files
     void cleanup_temp_files();

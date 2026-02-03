@@ -4,6 +4,12 @@
 #include <cstring>
 #include <map>
 
+#ifdef UNICONV_HAS_FFMPEG
+extern "C" {
+#include <libavutil/log.h>
+}
+#endif
+
 #ifdef _WIN32
 #include <windows.h>
 #else
@@ -193,6 +199,11 @@ ETLResult NativePlugin::execute(const ETLRequest& request) {
     native_req.get_core_option = get_core_option_impl;
     native_req.get_plugin_option = get_plugin_option_impl;
     native_req.options_ctx = &opt_ctx;
+
+#ifdef UNICONV_HAS_FFMPEG
+    // Suppress FFmpeg log output from plugins
+    av_log_set_level(AV_LOG_QUIET);
+#endif
 
     // Execute
     auto execute_fn = reinterpret_cast<UniconvPluginExecuteFunc>(execute_func_);

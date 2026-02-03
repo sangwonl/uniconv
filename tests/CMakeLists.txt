@@ -53,6 +53,12 @@ if(VIPS_FOUND)
     target_link_directories(uniconv_tests PRIVATE ${VIPS_LIBRARY_DIRS})
 endif()
 
+if(AVUTIL_FOUND)
+    target_include_directories(uniconv_tests PRIVATE ${AVUTIL_INCLUDE_DIRS})
+    target_link_libraries(uniconv_tests PRIVATE ${AVUTIL_LIBRARIES})
+    target_link_directories(uniconv_tests PRIVATE ${AVUTIL_LIBRARY_DIRS})
+endif()
+
 include(GoogleTest)
 gtest_discover_tests(uniconv_tests
     DISCOVERY_TIMEOUT 60
