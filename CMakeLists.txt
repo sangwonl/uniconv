@@ -112,6 +112,17 @@ add_executable(uniconv
     src/utils/string_utils.cpp
     src/utils/json_output.h
     src/utils/json_output.cpp
+    src/utils/version_utils.h
+    src/utils/version_utils.cpp
+    src/utils/http_utils.h
+    src/utils/http_utils.cpp
+    src/core/registry_types.h
+    src/core/dependency_checker.h
+    src/core/dependency_checker.cpp
+    src/core/installed_plugins.h
+    src/core/installed_plugins.cpp
+    src/core/registry_client.h
+    src/core/registry_client.cpp
 )
 
 target_include_directories(uniconv PRIVATE

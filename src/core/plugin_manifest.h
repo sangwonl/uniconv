@@ -37,6 +37,39 @@ namespace uniconv::core
         return std::nullopt;
     }
 
+    // Plugin dependency definition (from manifest)
+    struct Dependency
+    {
+        std::string name; // e.g., "python3", "Pillow"
+        std::string type; // "system", "python", "node"
+        std::optional<std::string> version; // e.g., ">=3.8"
+        std::optional<std::string> check;   // custom verification command
+
+        nlohmann::json to_json() const
+        {
+            nlohmann::json j;
+            j["name"] = name;
+            j["type"] = type;
+            if (version)
+                j["version"] = *version;
+            if (check)
+                j["check"] = *check;
+            return j;
+        }
+
+        static Dependency from_json(const nlohmann::json &j)
+        {
+            Dependency d;
+            d.name = j.at("name").get<std::string>();
+            d.type = j.value("type", "system");
+            if (j.contains("version"))
+                d.version = j.at("version").get<std::string>();
+            if (j.contains("check"))
+                d.check = j.at("check").get<std::string>();
+            return d;
+        }
+    };
+
     // Plugin option definition (from manifest)
     struct PluginOptionDef
     {
@@ -93,6 +126,9 @@ namespace uniconv::core
         // Options
         std::vector<PluginOptionDef> options;
 
+        // Dependencies
+        std::vector<Dependency> dependencies;
+
         // Metadata
         std::filesystem::path manifest_path; // Where this manifest was loaded from
         std::filesystem::path plugin_dir;    // Directory containing the plugin
@@ -124,6 +160,15 @@ namespace uniconv::core
                 for (const auto &opt : options)
                 {
                     j["options"].push_back(opt.to_json());
+                }
+            }
+
+            if (!dependencies.empty())
+            {
+                j["dependencies"] = nlohmann::json::array();
+                for (const auto &dep : dependencies)
+                {
+                    j["dependencies"].push_back(dep.to_json());
                 }
             }
 
@@ -162,6 +207,15 @@ namespace uniconv::core
                 for (const auto &opt_json : j.at("options"))
                 {
                     m.options.push_back(PluginOptionDef::from_json(opt_json));
+                }
+            }
+
+            // Dependencies
+            if (j.contains("dependencies") && j.at("dependencies").is_array())
+            {
+                for (const auto &dep_json : j.at("dependencies"))
+                {
+                    m.dependencies.push_back(Dependency::from_json(dep_json));
                 }
             }
 

@@ -163,6 +163,23 @@ bool ConfigManager::save() const {
     }
 }
 
+std::string ConfigManager::get_registry_url() const {
+    // Environment variable takes precedence
+    const char* env = std::getenv("UNICONV_REGISTRY");
+    if (env && *env) {
+        return std::string(env);
+    }
+
+    // Check settings
+    auto it = settings_.find("registry");
+    if (it != settings_.end()) {
+        return it->second;
+    }
+
+    // Default
+    return "https://uniconv.github.io/registry";
+}
+
 void ConfigManager::set_default_plugin(const std::string& key, const std::string& plugin_group) {
     defaults_[key] = plugin_group;
 }

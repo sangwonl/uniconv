@@ -173,7 +173,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "list"); });
 
         auto *plugin_install = plugin_cmd->add_subcommand("install", "Install a plugin");
-        plugin_install->add_option("path", args.subcommand_args, "Plugin path or URL")->required();
+        plugin_install->add_option("source", args.subcommand_args, "Plugin name[@version] or local path")->required();
         plugin_install->callback([&args]()
                                  {
         args.command = Command::Plugin;
@@ -192,6 +192,20 @@ namespace uniconv::cli
                               {
         args.command = Command::Plugin;
         args.subcommand_args.insert(args.subcommand_args.begin(), "info"); });
+
+        auto *plugin_search = plugin_cmd->add_subcommand("search", "Search plugin registry");
+        plugin_search->add_option("query", args.subcommand, "Search query")->required();
+        plugin_search->callback([&args]()
+                                {
+        args.command = Command::Plugin;
+        args.subcommand_args.insert(args.subcommand_args.begin(), "search"); });
+
+        auto *plugin_update = plugin_cmd->add_subcommand("update", "Update plugin(s)");
+        plugin_update->add_option("name", args.subcommand, "Plugin name (optional, updates all if omitted)");
+        plugin_update->callback([&args]()
+                                {
+        args.command = Command::Plugin;
+        args.subcommand_args.insert(args.subcommand_args.begin(), "update"); });
 
         // Config command
         auto *config_cmd = app.add_subcommand("config", "Manage configuration");

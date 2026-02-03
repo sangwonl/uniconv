@@ -1,4 +1,5 @@
 #include "plugin_command.h"
+#include "utils/version_utils.h"
 #include <iostream>
 #include <iomanip>
 
@@ -7,8 +8,12 @@ namespace uniconv::cli::commands
 
     PluginCommand::PluginCommand(
         std::shared_ptr<core::PluginManager> plugin_manager,
-        std::shared_ptr<core::ConfigManager> config_manager) : plugin_manager_(std::move(plugin_manager)), config_manager_(std::move(config_manager))
+        std::shared_ptr<core::ConfigManager> config_manager)
+        : plugin_manager_(std::move(plugin_manager)),
+          config_manager_(std::move(config_manager)),
+          installed_(core::ConfigManager::get_default_config_dir())
     {
+        installed_.load();
     }
 
     int PluginCommand::execute(const ParsedArgs &args)
@@ -36,9 +41,17 @@ namespace uniconv::cli::commands
         {
             return info(args);
         }
+        else if (action == "search")
+        {
+            return search(args);
+        }
+        else if (action == "update")
+        {
+            return update(args);
+        }
 
         std::cerr << "Unknown plugin action: " << action << "\n";
-        std::cerr << "Available actions: list, install, remove, info\n";
+        std::cerr << "Available actions: list, install, remove, info, search, update\n";
         return 1;
     }
 
@@ -57,7 +70,9 @@ namespace uniconv::cli::commands
             // Add built-in plugins
             for (const auto &p : builtin)
             {
-                j.push_back(p.to_json());
+                auto pj = p.to_json();
+                pj["source"] = "built-in";
+                j.push_back(pj);
             }
 
             // Add discovered external plugins
@@ -67,6 +82,7 @@ namespace uniconv::cli::commands
                 auto pj = info.to_json();
                 pj["path"] = m.plugin_dir.string();
                 pj["interface"] = core::plugin_interface_to_string(m.interface);
+                pj["source"] = installed_.is_registry_installed(m.name) ? "registry" : "local";
                 j.push_back(pj);
             }
 
@@ -79,8 +95,9 @@ namespace uniconv::cli::commands
                   << std::setw(25) << "NAME"
                   << std::setw(30) << "TARGETS"
                   << std::setw(10) << "VERSION"
-                  << "TYPE\n";
-        std::cout << std::string(73, '-') << "\n";
+                  << std::setw(12) << "SOURCE"
+                  << "\n";
+        std::cout << std::string(77, '-') << "\n";
 
         // Built-in plugins
         for (const auto &p : builtin)
@@ -99,7 +116,8 @@ namespace uniconv::cli::commands
                       << std::setw(25) << p.id
                       << std::setw(30) << targets
                       << std::setw(10) << p.version
-                      << "built-in\n";
+                      << std::setw(12) << "built-in"
+                      << "\n";
         }
 
         // External plugins
@@ -115,13 +133,14 @@ namespace uniconv::cli::commands
             if (m.targets.size() > 5)
                 targets += ",...";
 
-            std::string type = core::plugin_interface_to_string(m.interface);
+            std::string source = installed_.is_registry_installed(m.name) ? "registry" : "local";
 
             std::cout << std::left
                       << std::setw(25) << m.id()
                       << std::setw(30) << targets
                       << std::setw(10) << m.version
-                      << type << "\n";
+                      << std::setw(12) << source
+                      << "\n";
         }
 
         if (builtin.empty() && manifests.empty())
@@ -136,79 +155,191 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand_args.size() < 2)
         {
-            std::cerr << "Usage: uniconv plugin install <path>\n";
+            std::cerr << "Usage: uniconv plugin install <name[@version]> or <path>\n";
             return 1;
         }
 
-        std::filesystem::path source_path = args.subcommand_args[1];
+        const auto &source_arg = args.subcommand_args[1];
 
-        // Check if source exists
-        if (!std::filesystem::exists(source_path))
+        // Check if source is a local path
+        if (std::filesystem::exists(source_arg))
         {
-            std::cerr << "Error: Path does not exist: " << source_path << "\n";
-            return 1;
-        }
+            std::filesystem::path source_path = source_arg;
 
-        // If source is a file, assume it's a manifest and use parent directory
-        if (std::filesystem::is_regular_file(source_path))
-        {
-            if (source_path.filename() == core::PluginDiscovery::kManifestFilename)
+            // If source is a file, assume it's a manifest and use parent directory
+            if (std::filesystem::is_regular_file(source_path))
             {
-                source_path = source_path.parent_path();
+                if (source_path.filename() == core::PluginDiscovery::kManifestFilename)
+                {
+                    source_path = source_path.parent_path();
+                }
+                else
+                {
+                    std::cerr << "Error: Expected a directory or plugin.json file\n";
+                    return 1;
+                }
             }
-            else
+
+            // Load manifest to get plugin name
+            auto manifest = discovery_.load_manifest(source_path);
+            if (!manifest)
             {
-                std::cerr << "Error: Expected a directory or plugin.json file\n";
+                std::cerr << "Error: Could not load plugin manifest from: " << source_path << "\n";
+                std::cerr << "Make sure the directory contains a valid plugin.json file\n";
                 return 1;
             }
+
+            // Destination in user plugins directory
+            auto user_plugins = core::PluginDiscovery::get_user_plugin_dir();
+            auto dest_path = user_plugins / manifest->name;
+
+            // Check if already installed
+            if (std::filesystem::exists(dest_path))
+            {
+                if (!args.core_options.force)
+                {
+                    std::cerr << "Error: Plugin already installed at: " << dest_path << "\n";
+                    std::cerr << "Use --force to overwrite\n";
+                    return 1;
+                }
+                std::filesystem::remove_all(dest_path);
+            }
+
+            // Copy plugin
+            if (!copy_plugin(source_path, dest_path))
+            {
+                std::cerr << "Error: Failed to copy plugin to: " << dest_path << "\n";
+                return 1;
+            }
+
+            // Check dependencies
+            if (!manifest->dependencies.empty())
+            {
+                auto dep_results = dep_checker_.check_all(manifest->dependencies);
+                core::DependencyChecker::print_warnings(dep_results);
+            }
+
+            if (!args.core_options.quiet)
+            {
+                std::cout << "Installed plugin: " << manifest->name << " (" << manifest->version << ")\n";
+                std::cout << "Location: " << dest_path << "\n";
+            }
+
+            if (args.core_options.json_output)
+            {
+                nlohmann::json j;
+                j["success"] = true;
+                j["plugin"] = manifest->name;
+                j["version"] = manifest->version;
+                j["path"] = dest_path.string();
+                j["source"] = "local";
+                std::cout << j.dump(2) << std::endl;
+            }
+
+            return 0;
         }
 
-        // Load manifest to get plugin name
-        auto manifest = discovery_.load_manifest(source_path);
-        if (!manifest)
+        // Not a local path — treat as registry install
+        auto [name, version] = parse_install_arg(source_arg);
+        return install_from_registry(name, version, args);
+    }
+
+    int PluginCommand::install_from_registry(const std::string &name,
+                                             const std::optional<std::string> &version,
+                                             const ParsedArgs &args)
+    {
+        auto client = make_registry_client();
+
+        if (!args.core_options.quiet)
         {
-            std::cerr << "Error: Could not load plugin manifest from: " << source_path << "\n";
-            std::cerr << "Make sure the directory contains a valid plugin.json file\n";
+            std::cout << "Searching registry for " << name;
+            if (version)
+                std::cout << "@" << *version;
+            std::cout << "...\n";
+        }
+
+        // Fetch plugin entry
+        auto entry = client->fetch_plugin(name);
+        if (!entry)
+        {
+            std::cerr << "Error: Plugin not found in registry: " << name << "\n";
+            std::cerr << "Use 'uniconv plugin search' to find available plugins\n";
             return 1;
         }
 
-        // Destination in user plugins directory
-        auto user_plugins = core::PluginDiscovery::get_user_plugin_dir();
-        auto dest_path = user_plugins / manifest->name;
+        // Resolve release
+        auto release = client->resolve_release(*entry, version);
+        if (!release)
+        {
+            std::cerr << "Error: No compatible release found for " << name;
+            if (version)
+                std::cerr << "@" << *version;
+            std::cerr << "\n";
+            return 1;
+        }
+
+        // Resolve artifact
+        auto artifact = client->resolve_artifact(*release);
+        if (!artifact)
+        {
+            std::cerr << "Error: No artifact available for current platform\n";
+            return 1;
+        }
 
         // Check if already installed
-        if (std::filesystem::exists(dest_path))
+        auto user_plugins = core::PluginDiscovery::get_user_plugin_dir();
+        auto dest_dir = user_plugins / name;
+
+        if (std::filesystem::exists(dest_dir) && !args.core_options.force)
         {
-            if (!args.core_options.force)
+            auto existing = installed_.get(name);
+            if (existing && existing->version == release->version)
             {
-                std::cerr << "Error: Plugin already installed at: " << dest_path << "\n";
-                std::cerr << "Use --force to overwrite\n";
+                std::cerr << "Plugin " << name << "@" << release->version << " is already installed\n";
+                std::cerr << "Use --force to reinstall\n";
                 return 1;
             }
-            // Remove existing
-            std::filesystem::remove_all(dest_path);
-        }
-
-        // Copy plugin
-        if (!copy_plugin(source_path, dest_path))
-        {
-            std::cerr << "Error: Failed to copy plugin to: " << dest_path << "\n";
-            return 1;
         }
 
         if (!args.core_options.quiet)
         {
-            std::cout << "Installed plugin: " << manifest->name << " (" << manifest->version << ")\n";
-            std::cout << "Location: " << dest_path << "\n";
+            std::cout << "Downloading " << name << "@" << release->version << "...\n";
+        }
+
+        // Download and extract
+        auto result = client->download_and_extract(*artifact, dest_dir);
+        if (!result)
+        {
+            std::cerr << "Error: Failed to download or extract plugin\n";
+            std::cerr << "This may be caused by a network error or invalid artifact\n";
+            return 1;
+        }
+
+        // Record installation
+        installed_.record_install(name, release->version);
+        installed_.save();
+
+        // Check dependencies
+        if (!release->dependencies.empty())
+        {
+            auto dep_results = dep_checker_.check_all(release->dependencies);
+            core::DependencyChecker::print_warnings(dep_results);
+        }
+
+        if (!args.core_options.quiet)
+        {
+            std::cout << "Installed " << name << "@" << release->version
+                      << " to " << dest_dir << "\n";
         }
 
         if (args.core_options.json_output)
         {
             nlohmann::json j;
             j["success"] = true;
-            j["plugin"] = manifest->name;
-            j["version"] = manifest->version;
-            j["path"] = dest_path.string();
+            j["plugin"] = name;
+            j["version"] = release->version;
+            j["path"] = dest_dir.string();
+            j["source"] = "registry";
             std::cout << j.dump(2) << std::endl;
         }
 
@@ -253,6 +384,10 @@ namespace uniconv::cli::commands
             return 1;
         }
 
+        // Update installed.json
+        installed_.record_remove(name);
+        installed_.save();
+
         if (!args.core_options.quiet)
         {
             std::cout << "Removed plugin: " << name << "\n";
@@ -287,7 +422,9 @@ namespace uniconv::cli::commands
             {
                 if (args.core_options.json_output)
                 {
-                    std::cout << p.to_json().dump(2) << std::endl;
+                    auto j = p.to_json();
+                    j["source"] = "built-in";
+                    std::cout << j.dump(2) << std::endl;
                 }
                 else
                 {
@@ -295,7 +432,7 @@ namespace uniconv::cli::commands
                     std::cout << "Group:       " << p.group << "\n";
                     std::cout << "Version:     " << p.version << "\n";
                     std::cout << "Description: " << p.description << "\n";
-                    std::cout << "Type:        built-in\n";
+                    std::cout << "Source:      built-in\n";
                     std::cout << "Targets:     ";
                     for (size_t i = 0; i < p.targets.size(); ++i)
                     {
@@ -332,10 +469,13 @@ namespace uniconv::cli::commands
             return 1;
         }
 
+        std::string source = installed_.is_registry_installed(manifest->name) ? "registry" : "local";
+
         if (args.core_options.json_output)
         {
             auto j = manifest->to_json();
             j["path"] = plugin_dir->string();
+            j["source"] = source;
             std::cout << j.dump(2) << std::endl;
         }
         else
@@ -345,6 +485,7 @@ namespace uniconv::cli::commands
             std::cout << "Version:     " << manifest->version << "\n";
             std::cout << "Description: " << manifest->description << "\n";
             std::cout << "Type:        " << core::plugin_interface_to_string(manifest->interface) << "\n";
+            std::cout << "Source:      " << source << "\n";
             std::cout << "Path:        " << *plugin_dir << "\n";
 
             if (manifest->interface == core::PluginInterface::CLI)
@@ -391,9 +532,195 @@ namespace uniconv::cli::commands
                     }
                 }
             }
+
+            if (!manifest->dependencies.empty())
+            {
+                std::cout << "\nDependencies:\n";
+                for (const auto &dep : manifest->dependencies)
+                {
+                    std::cout << "  [" << dep.type << "] " << dep.name;
+                    if (dep.version)
+                        std::cout << " " << *dep.version;
+                    std::cout << "\n";
+                }
+            }
         }
 
         return 0;
+    }
+
+    int PluginCommand::search(const ParsedArgs &args)
+    {
+        if (args.subcommand.empty())
+        {
+            std::cerr << "Usage: uniconv plugin search <query>\n";
+            return 1;
+        }
+
+        auto client = make_registry_client();
+        auto results = client->search(args.subcommand);
+
+        if (results.empty())
+        {
+            if (!args.core_options.quiet)
+            {
+                std::cout << "No plugins found matching: " << args.subcommand << "\n";
+            }
+
+            if (args.core_options.json_output)
+            {
+                std::cout << nlohmann::json::array().dump(2) << std::endl;
+            }
+            return 0;
+        }
+
+        if (args.core_options.json_output)
+        {
+            nlohmann::json j = nlohmann::json::array();
+            for (const auto &entry : results)
+            {
+                j.push_back(entry.to_json());
+            }
+            std::cout << j.dump(2) << std::endl;
+            return 0;
+        }
+
+        std::cout << std::left
+                  << std::setw(25) << "NAME"
+                  << std::setw(10) << "VERSION"
+                  << std::setw(15) << "AUTHOR"
+                  << "DESCRIPTION\n";
+        std::cout << std::string(80, '-') << "\n";
+
+        for (const auto &entry : results)
+        {
+            // Truncate description to fit
+            std::string desc = entry.description;
+            if (desc.size() > 40)
+                desc = desc.substr(0, 37) + "...";
+
+            std::cout << std::left
+                      << std::setw(25) << entry.name
+                      << std::setw(10) << entry.latest
+                      << std::setw(15) << entry.author
+                      << desc << "\n";
+        }
+
+        std::cout << "\n"
+                  << results.size() << " plugin(s) found\n";
+
+        return 0;
+    }
+
+    int PluginCommand::update(const ParsedArgs &args)
+    {
+        auto client = make_registry_client();
+        const auto &all_installed = installed_.all();
+
+        // If a specific name is given, update only that
+        std::vector<std::string> to_update;
+
+        if (!args.subcommand.empty())
+        {
+            if (!installed_.is_registry_installed(args.subcommand))
+            {
+                std::cerr << "Error: " << args.subcommand << " was not installed from registry\n";
+                return 1;
+            }
+            to_update.push_back(args.subcommand);
+        }
+        else
+        {
+            // Update all registry-installed plugins
+            for (const auto &[name, record] : all_installed)
+            {
+                if (record.source == "registry")
+                    to_update.push_back(name);
+            }
+        }
+
+        if (to_update.empty())
+        {
+            if (!args.core_options.quiet)
+            {
+                std::cout << "No registry-installed plugins to update\n";
+            }
+            return 0;
+        }
+
+        int updated = 0;
+        int failed = 0;
+
+        for (const auto &name : to_update)
+        {
+            auto record = installed_.get(name);
+            if (!record)
+                continue;
+
+            auto entry = client->fetch_plugin(name);
+            if (!entry)
+            {
+                if (!args.core_options.quiet)
+                {
+                    std::cerr << "Warning: Could not fetch registry info for " << name << "\n";
+                }
+                ++failed;
+                continue;
+            }
+
+            auto release = client->resolve_release(*entry);
+            if (!release)
+            {
+                if (!args.core_options.quiet)
+                {
+                    std::cerr << "Warning: No compatible release found for " << name << "\n";
+                }
+                ++failed;
+                continue;
+            }
+
+            // Compare versions
+            int cmp = utils::compare_versions(release->version, record->version);
+            if (cmp <= 0)
+            {
+                if (!args.core_options.quiet)
+                {
+                    std::cout << name << " is up to date (" << record->version << ")\n";
+                }
+                continue;
+            }
+
+            if (!args.core_options.quiet)
+            {
+                std::cout << "Updating " << name << " " << record->version
+                          << " -> " << release->version << "...\n";
+            }
+
+            // Create a modified args with force=true for the reinstall
+            ParsedArgs install_args = args;
+            install_args.core_options.force = true;
+
+            int result = install_from_registry(name, release->version, install_args);
+            if (result == 0)
+            {
+                ++updated;
+            }
+            else
+            {
+                ++failed;
+            }
+        }
+
+        if (!args.core_options.quiet)
+        {
+            std::cout << "\n"
+                      << updated << " plugin(s) updated";
+            if (failed > 0)
+                std::cout << ", " << failed << " failed";
+            std::cout << "\n";
+        }
+
+        return failed > 0 ? 1 : 0;
     }
 
     bool PluginCommand::copy_plugin(const std::filesystem::path &source, const std::filesystem::path &dest)
@@ -426,6 +753,24 @@ namespace uniconv::cli::commands
         }
 
         return std::nullopt;
+    }
+
+    std::unique_ptr<core::RegistryClient> PluginCommand::make_registry_client() const
+    {
+        auto url = config_manager_->get_registry_url();
+        auto cache_dir = config_manager_->config_dir() / "registry-cache";
+        return std::make_unique<core::RegistryClient>(url, cache_dir);
+    }
+
+    std::pair<std::string, std::optional<std::string>>
+    PluginCommand::parse_install_arg(const std::string &arg)
+    {
+        auto at_pos = arg.find('@');
+        if (at_pos != std::string::npos)
+        {
+            return {arg.substr(0, at_pos), arg.substr(at_pos + 1)};
+        }
+        return {arg, std::nullopt};
     }
 
 } // namespace uniconv::cli::commands

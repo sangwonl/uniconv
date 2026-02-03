@@ -56,6 +56,14 @@ public:
     // Get all custom plugin paths
     const std::vector<std::filesystem::path>& get_plugin_paths() const { return plugin_paths_; }
 
+    // --- Registry ---
+
+    // Get registry URL (env var > settings > default)
+    std::string get_registry_url() const;
+
+    // Get config directory path
+    const std::filesystem::path& config_dir() const { return config_dir_; }
+
     // --- Generic key-value settings ---
 
     // Set a string value

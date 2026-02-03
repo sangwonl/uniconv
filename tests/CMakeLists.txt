@@ -23,6 +23,11 @@ set(UNICONV_SOURCES
     ${CMAKE_SOURCE_DIR}/src/utils/file_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/string_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/json_output.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/version_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/http_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/dependency_checker.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/installed_plugins.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/registry_client.cpp
 )
 
 # Test executable
@@ -32,6 +37,9 @@ add_executable(uniconv_tests
     unit/test_file_utils.cpp
     unit/test_preset_manager.cpp
     unit/test_pipeline_parser.cpp
+    unit/test_version_utils.cpp
+    unit/test_registry_types.cpp
+    unit/test_installed_plugins.cpp
     ${UNICONV_SOURCES}
 )
 
