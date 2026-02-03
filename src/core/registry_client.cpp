@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <fstream>
 #include <iomanip>
+#include <iostream>
 
 namespace uniconv::core
 {
@@ -179,14 +180,24 @@ namespace uniconv::core
         // Download
         if (!utils::download_file(artifact.url, temp_file))
         {
+            std::cerr << "Download failed: " << artifact.url << "\n";
             std::filesystem::remove_all(temp_dir);
             return std::nullopt;
         }
 
         // Verify SHA-256
         auto computed_hash = utils::sha256_file(temp_file);
-        if (!computed_hash || *computed_hash != artifact.sha256)
+        if (!computed_hash)
         {
+            std::cerr << "SHA-256 computation failed for downloaded file\n";
+            std::filesystem::remove_all(temp_dir);
+            return std::nullopt;
+        }
+        if (*computed_hash != artifact.sha256)
+        {
+            std::cerr << "SHA-256 mismatch:\n"
+                      << "  expected: " << artifact.sha256 << "\n"
+                      << "  got:      " << *computed_hash << "\n";
             std::filesystem::remove_all(temp_dir);
             return std::nullopt;
         }
@@ -216,6 +227,7 @@ namespace uniconv::core
 
         if (ret != 0)
         {
+            std::cerr << "Failed to extract archive\n";
             std::filesystem::remove_all(temp_dir);
             return std::nullopt;
         }

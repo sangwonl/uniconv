@@ -237,7 +237,7 @@ namespace uniconv::utils
 
         auto timeout_str = std::to_string(timeout.count());
         std::vector<std::string> args = {
-            "-sS", "-f", "--max-time", timeout_str, url};
+            "-sS", "-f", "-L", "--max-time", timeout_str, url};
 
         auto result = run_command("curl", args, timeout + std::chrono::seconds{5});
 
@@ -271,7 +271,7 @@ namespace uniconv::utils
 
         auto timeout_str = std::to_string(timeout.count());
         std::vector<std::string> args = {
-            "-sS", "-f", "--max-time", timeout_str,
+            "-sS", "-f", "-L", "--max-time", timeout_str,
             "-o", dest.string(), url};
 
         auto result = run_command("curl", args, timeout + std::chrono::seconds{5});
