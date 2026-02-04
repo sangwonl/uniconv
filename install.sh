@@ -48,9 +48,8 @@ download_and_install() {
   local filename="uniconv-${version}-${os}-${arch}.tar.gz"
   local url="https://github.com/${REPO}/releases/download/${version}/${filename}"
   local tmpdir
-
   tmpdir=$(mktemp -d)
-  trap 'rm -rf "$tmpdir"' EXIT
+  trap 'rm -rf "'"$tmpdir"'"' EXIT
 
   info "Downloading uniconv ${version} for ${os}/${arch}..."
   if ! curl -fsSL -o "${tmpdir}/${filename}" "$url"; then
