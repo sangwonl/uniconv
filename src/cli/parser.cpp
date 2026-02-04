@@ -1,6 +1,7 @@
 #include "parser.h"
 #include "pipeline_parser.h"
 #include <uniconv/version.h>
+#include <sstream>
 
 namespace uniconv::cli
 {
@@ -44,15 +45,16 @@ namespace uniconv::cli
         {
             if (e.get_exit_code() == 0)
             {
-                // Help or version was requested
-                if (app.get_help_ptr()->count() > 0)
-                {
-                    args.command = Command::Help;
-                }
-                else
-                {
-                    args.command = Command::Version;
-                }
+                // Help or version was requested — let CLI11 produce the
+                // correct output (including subcommand-specific help).
+                std::ostringstream oss;
+                auto old_buf = std::cout.rdbuf(oss.rdbuf());
+                app.exit(e);
+                std::cout.rdbuf(old_buf);
+
+                parse_exit_code_ = 0;
+                parse_exit_message_ = oss.str();
+                args.command = Command::Help;
             }
             else
             {
@@ -111,13 +113,15 @@ namespace uniconv::cli
         info_cmd->callback([&args]()
                            { args.command = Command::Info; });
 
-        // Formats command
+        // Formats command (hidden — not yet implemented)
         auto *formats_cmd = app.add_subcommand("formats", "List supported formats");
+        formats_cmd->group("");
         formats_cmd->callback([&args]()
                               { args.command = Command::Formats; });
 
-        // Preset command (manage)
+        // Preset command (hidden — not yet implemented)
         auto *preset_cmd = app.add_subcommand("preset", "Manage presets");
+        preset_cmd->group("");
         preset_cmd->require_subcommand(1);
 
         auto *preset_list = preset_cmd->add_subcommand("list", "List all presets");
@@ -208,8 +212,9 @@ namespace uniconv::cli
         args.command = Command::Plugin;
         args.subcommand_args.insert(args.subcommand_args.begin(), "update"); });
 
-        // Config command
+        // Config command (hidden — not yet implemented)
         auto *config_cmd = app.add_subcommand("config", "Manage configuration");
+        config_cmd->group("");
         config_cmd->require_subcommand(1);
 
         auto *config_get = config_cmd->add_subcommand("get", "Get config value");

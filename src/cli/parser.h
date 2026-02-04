@@ -49,10 +49,18 @@ public:
     ~CliParser() = default;
 
     // Parse command line arguments
+    // Returns exit code via parse_exit_code if help/version was requested
     ParsedArgs parse(int argc, char** argv);
 
     // Get help text
     std::string help();
+
+    // If parse() detected a help/version request, this holds the exit code (0).
+    // -1 means normal parsing succeeded and no help/version was requested.
+    int parse_exit_code() const { return parse_exit_code_; }
+
+    // The help/version text produced by CLI11 for the exact subcommand requested
+    const std::string& parse_exit_message() const { return parse_exit_message_; }
 
 private:
     void setup_main_options(CLI::App& app, ParsedArgs& args);
@@ -60,6 +68,9 @@ private:
 
     // Determine command from parsed state
     Command determine_command(const CLI::App& app, const ParsedArgs& args);
+
+    int parse_exit_code_ = -1;
+    std::string parse_exit_message_;
 };
 
 } // namespace uniconv::cli

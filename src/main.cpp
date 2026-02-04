@@ -47,7 +47,16 @@ int main(int argc, char **argv)
         switch (args.command)
         {
         case cli::Command::Help:
-            std::cout << parser.help() << std::endl;
+            if (parser.parse_exit_code() >= 0)
+            {
+                // CLI11 produced subcommand-specific help or version text
+                std::cout << parser.parse_exit_message();
+            }
+            else
+            {
+                // No args at all — show top-level help
+                std::cout << parser.help() << std::endl;
+            }
             return 0;
 
         case cli::Command::Version:
