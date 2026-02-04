@@ -13,7 +13,7 @@
  *       static UniconvDataType out_types[] = {UNICONV_DATA_IMAGE, 0};
  *       static UniconvPluginInfo info = {
  *           .name = "my-plugin",
- *           .group = "my-plugin",
+ *           .scope = "my-plugin",
  *           .version = "1.0.0",
  *           .description = "My awesome plugin",
  *           .targets = (const char*[]){"target1", "target2", NULL},
@@ -47,7 +47,7 @@ extern "C"
 #endif
 
 /* API version for compatibility checking */
-#define UNICONV_API_VERSION 2
+#define UNICONV_API_VERSION 3
 
     /**
      * Data types for plugin input/output
@@ -82,7 +82,7 @@ extern "C"
     typedef struct
     {
         const char *name;           /* Plugin name (e.g., "my-plugin") */
-        const char *group;          /* Plugin group (e.g., "my-plugin") */
+        const char *scope;          /* Plugin scope (e.g., "my-plugin") */
         const char *version;        /* Version string (e.g., "1.0.0") */
         const char *description;    /* Human-readable description */
         const char **targets;       /* NULL-terminated array of supported targets */

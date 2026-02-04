@@ -234,22 +234,22 @@ uniconv --interactive photo.heic
 - **하나의 플러그인 = 하나의 ETL 타입**
 - **하나의 플러그인 → 여러 타겟 지원 가능**
 - **여러 플러그인 → 같은 타겟 지원 가능**
-- **같은 그룹명 공유 가능** (예: ffmpeg.transform, ffmpeg.extract)
+- **같은 스코프명 공유 가능** (예: ffmpeg.transform, ffmpeg.extract)
 
 ### 4.2 플러그인 식별
 
 ```
-<그룹명>.<etl타입>
+<스코프명>.<etl타입>
 ```
 
-| 식별자              | 그룹명    | ETL       |
+| 식별자              | 스코프명  | ETL       |
 | ------------------- | --------- | --------- |
 | `ffmpeg.transform`  | ffmpeg    | transform |
 | `ffmpeg.extract`    | ffmpeg    | extract   |
 | `ai-vision.extract` | ai-vision | extract   |
 | `gdrive.load`       | gdrive    | load      |
 
-파이프라인에서는 그룹명만 사용 (타겟으로 ETL 결정):
+파이프라인에서는 스코프명만 사용 (타겟으로 ETL 결정):
 
 ```bash
 uniconv "video.mov | mp4@ffmpeg"      # → ffmpeg.transform
@@ -386,8 +386,11 @@ if __name__ == '__main__':
 uniconv plugin install ffmpeg.transform
 uniconv plugin install ffmpeg.extract
 
-# 그룹 전체 설치
+# 스코프 전체 설치
 uniconv plugin install ffmpeg
+
+# 컬렉션 설치
+uniconv plugin install +essentials
 
 # 온라인에서 검색/설치
 uniconv plugin search face
@@ -406,8 +409,8 @@ uniconv plugin list
 # 특정 타겟 지원 플러그인 조회
 uniconv plugin list --target faces
 
-# 그룹 상세 조회
-uniconv plugin list --group ffmpeg
+# 스코프 상세 조회
+uniconv plugin list --scope ffmpeg
 
 # 기본 플러그인 설정
 uniconv config set default.jpg vips
@@ -433,9 +436,9 @@ faces     ai-vision.extract       1.2.0     ✓
 faces     face-yolo.extract       2.0.0
 faces     face-mediapipe.extract  1.1.0
 
-$ uniconv plugin list --group ffmpeg
+$ uniconv plugin list --scope ffmpeg
 
-GROUP       ffmpeg
+SCOPE       ffmpeg
 PLUGINS
   ffmpeg.transform    mp4, webm, mkv, avi, gif, mp3, wav
   ffmpeg.extract      audio, frames, thumbnail, subtitle
@@ -559,7 +562,7 @@ uniconv formats                      # 지원 포맷 목록
 uniconv preset list                  # 프리셋 목록
 uniconv plugin list                  # 플러그인 목록
 uniconv plugin list --target <t>     # 특정 타겟 지원 플러그인
-uniconv plugin list --group <g>      # 특정 그룹 플러그인
+uniconv plugin list --scope <s>      # 특정 스코프 플러그인
 ```
 
 ### 6.3 관리 명령어

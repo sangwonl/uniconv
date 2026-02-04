@@ -106,7 +106,7 @@ namespace uniconv::core
     {
         // Identification
         std::string name;    // e.g., "face-extractor"
-        std::string group;   // e.g., "ai-vision"
+        std::string scope;   // e.g., "ai-vision"
         std::string version; // e.g., "1.0.0"
         std::string description;
 
@@ -133,17 +133,17 @@ namespace uniconv::core
         std::filesystem::path manifest_path; // Where this manifest was loaded from
         std::filesystem::path plugin_dir;    // Directory containing the plugin
 
-        // Computed ID (just the group name now)
+        // Computed ID (just the scope name now)
         std::string id() const
         {
-            return group;
+            return scope;
         }
 
         nlohmann::json to_json() const
         {
             nlohmann::json j;
             j["name"] = name;
-            j["group"] = group;
+            j["scope"] = scope;
             j["version"] = version;
             j["description"] = description;
             j["targets"] = targets;
@@ -180,7 +180,7 @@ namespace uniconv::core
             PluginManifest m;
 
             m.name = j.at("name").get<std::string>();
-            m.group = j.value("group", m.name); // Default group to name
+            m.scope = j.value("scope", j.value("group", m.name)); // Default scope to name, with backward compat for "group"
             m.version = j.value("version", "0.0.0");
             m.description = j.value("description", "");
 
@@ -227,7 +227,7 @@ namespace uniconv::core
         {
             PluginInfo info;
             info.id = id();
-            info.group = group;
+            info.scope = scope;
             info.targets = targets;
             info.input_formats = input_formats;
             info.input_types = input_types;

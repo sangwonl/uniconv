@@ -34,6 +34,12 @@ namespace uniconv::core
         std::optional<RegistryArtifact> resolve_artifact(
             const RegistryRelease &release);
 
+        // Fetch the collections list from the registry
+        std::optional<RegistryCollections> fetch_collections();
+
+        // Find a collection by name
+        std::optional<RegistryCollection> find_collection(const std::string &name);
+
         // Download and verify an artifact, extract to destination directory
         // Returns path to extracted plugin directory
         std::optional<std::filesystem::path> download_and_extract(

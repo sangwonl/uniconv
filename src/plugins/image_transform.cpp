@@ -49,8 +49,8 @@ namespace uniconv::plugins
     core::PluginInfo ImageTransformPlugin::info() const
     {
         core::PluginInfo info;
-        info.id = std::string(kGroupName);
-        info.group = std::string(kGroupName);
+        info.id = std::string(kScopeName);
+        info.scope = std::string(kScopeName);
         info.version = "0.1.0";
 #ifdef UNICONV_HAS_VIPS
         info.description = "Image format transformation using libvips";
@@ -143,7 +143,7 @@ namespace uniconv::plugins
         if (request.core_options.dry_run)
         {
             auto result = core::Result::success(
-                request.target, std::string(kGroupName),
+                request.target, std::string(kScopeName),
                 request.source, output_path,
                 std::filesystem::file_size(request.source), 0);
             result.extra["dry_run"] = true;
@@ -327,7 +327,7 @@ namespace uniconv::plugins
             size_t output_size = std::filesystem::file_size(output);
 
             auto result = core::Result::success(
-                format, std::string(kGroupName),
+                format, std::string(kScopeName),
                 input, output, input_size, output_size);
 
             // Add image dimensions to extra info

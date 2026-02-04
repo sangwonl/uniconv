@@ -10,7 +10,7 @@ namespace uniconv::plugins
     class ImageTransformPlugin : public IPlugin
     {
     public:
-        static constexpr std::string_view kGroupName = "image-core";
+        static constexpr std::string_view kScopeName = "image-core";
 
         // Supported formats
         static constexpr std::array<std::string_view, 9> kInputFormats = {

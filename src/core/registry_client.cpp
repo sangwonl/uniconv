@@ -52,6 +52,40 @@ namespace uniconv::core
         }
     }
 
+    std::optional<RegistryCollections> RegistryClient::fetch_collections()
+    {
+        auto url = registry_url_ + "/collections.json";
+        auto response = utils::http_get(url);
+
+        if (!response.success)
+            return std::nullopt;
+
+        try
+        {
+            auto j = nlohmann::json::parse(response.body);
+            return RegistryCollections::from_json(j);
+        }
+        catch (const std::exception &)
+        {
+            return std::nullopt;
+        }
+    }
+
+    std::optional<RegistryCollection> RegistryClient::find_collection(const std::string &name)
+    {
+        auto collections = fetch_collections();
+        if (!collections)
+            return std::nullopt;
+
+        for (const auto &c : collections->collections)
+        {
+            if (c.name == name)
+                return c;
+        }
+
+        return std::nullopt;
+    }
+
     std::optional<RegistryPluginEntry> RegistryClient::fetch_plugin(const std::string &name)
     {
         auto url = registry_url_ + "/plugins/" + name + "/manifest.json";

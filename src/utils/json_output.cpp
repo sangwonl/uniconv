@@ -157,7 +157,7 @@ namespace uniconv::utils
             return;
         }
 
-        os << info.group;
+        os << info.scope;
         if (info.builtin)
         {
             os << " [built-in]";

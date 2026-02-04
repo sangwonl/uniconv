@@ -116,7 +116,7 @@ namespace uniconv::core
             for (auto &plugin : plugins_)
             {
                 auto info = plugin->info();
-                if (to_lower(info.group) == lower_explicit &&
+                if (to_lower(info.scope) == lower_explicit &&
                     plugin->supports_target(lower_target))
                 {
                     return plugin.get();
@@ -132,7 +132,7 @@ namespace uniconv::core
             for (auto &plugin : plugins_)
             {
                 auto info = plugin->info();
-                if (to_lower(info.group) == default_it->second &&
+                if (to_lower(info.scope) == default_it->second &&
                     plugin->supports_target(lower_target))
                 {
                     return plugin.get();
@@ -223,9 +223,9 @@ namespace uniconv::core
         return result;
     }
 
-    void PluginManager::set_default(const std::string &target, const std::string &plugin_group)
+    void PluginManager::set_default(const std::string &target, const std::string &plugin_scope)
     {
-        defaults_[to_lower(target)] = to_lower(plugin_group);
+        defaults_[to_lower(target)] = to_lower(plugin_scope);
     }
 
     std::optional<std::string> PluginManager::get_default(const std::string &target) const

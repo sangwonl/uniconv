@@ -106,8 +106,8 @@ namespace uniconv::core
         }
 
         // Convert to PluginInfo
-        cached_info_.id = native_info->group ? native_info->group : manifest_.group;
-        cached_info_.group = native_info->group ? native_info->group : manifest_.group;
+        cached_info_.id = native_info->scope ? native_info->scope : manifest_.scope;
+        cached_info_.scope = native_info->scope ? native_info->scope : manifest_.scope;
         cached_info_.version = native_info->version ? native_info->version : manifest_.version;
         cached_info_.description = native_info->description ? native_info->description : manifest_.description;
         cached_info_.builtin = false;
@@ -266,7 +266,7 @@ namespace uniconv::core
         // Convert result
         Result result;
         result.target = request.target;
-        result.plugin_used = manifest_.group;
+        result.plugin_used = manifest_.scope;
         result.input = request.source;
         result.input_size = std::filesystem::file_size(request.source);
 

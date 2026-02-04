@@ -61,7 +61,7 @@ namespace uniconv::core
             return Result::failure(
                 request.target,
                 request.source,
-                "Plugin '" + plugin->info().group + "' does not support input format: " + input_format);
+                "Plugin '" + plugin->info().scope + "' does not support input format: " + input_format);
         }
 
         // Resolve output path
@@ -73,7 +73,7 @@ namespace uniconv::core
             Result result;
             result.status = ResultStatus::Skipped;
             result.target = request.target;
-            result.plugin_used = plugin->info().group;
+            result.plugin_used = plugin->info().scope;
             result.input = request.source;
             result.input_size = input_size;
             result.output = output_path;
@@ -87,7 +87,7 @@ namespace uniconv::core
             Result result;
             result.status = ResultStatus::Success;
             result.target = request.target;
-            result.plugin_used = plugin->info().group;
+            result.plugin_used = plugin->info().scope;
             result.input = request.source;
             result.input_size = input_size;
             result.output = output_path;
@@ -107,7 +107,7 @@ namespace uniconv::core
 
         // Execute plugin
         auto result = plugin->execute(resolved_request);
-        result.plugin_used = plugin->info().group;
+        result.plugin_used = plugin->info().scope;
         result.input_size = input_size;
 
         // Get output size if successful

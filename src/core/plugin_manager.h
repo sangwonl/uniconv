@@ -60,12 +60,12 @@ namespace uniconv::core
         std::vector<PluginInfo> list_plugins_for_target(const std::string &target) const;
 
         // Get/set default plugin for target
-        void set_default(const std::string &target, const std::string &plugin_group);
+        void set_default(const std::string &target, const std::string &plugin_scope);
         std::optional<std::string> get_default(const std::string &target) const;
 
     private:
         std::vector<std::unique_ptr<plugins::IPlugin>> plugins_;
-        std::map<std::string, std::string> defaults_; // target → plugin_group
+        std::map<std::string, std::string> defaults_; // target → plugin_scope
         PluginDiscovery discovery_;
         bool external_loaded_ = false;
     };

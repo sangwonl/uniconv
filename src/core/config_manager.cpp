@@ -180,8 +180,8 @@ std::string ConfigManager::get_registry_url() const {
     return "https://uniconv.github.io/registry";
 }
 
-void ConfigManager::set_default_plugin(const std::string& key, const std::string& plugin_group) {
-    defaults_[key] = plugin_group;
+void ConfigManager::set_default_plugin(const std::string& key, const std::string& plugin_scope) {
+    defaults_[key] = plugin_scope;
 }
 
 std::optional<std::string> ConfigManager::get_default_plugin(const std::string& key) const {

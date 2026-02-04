@@ -155,11 +155,18 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand_args.size() < 2)
         {
-            std::cerr << "Usage: uniconv plugin install <name[@version]> or <path>\n";
+            std::cerr << "Usage: uniconv plugin install <name[@version]> | <path> | +<collection>\n";
             return 1;
         }
 
         const auto &source_arg = args.subcommand_args[1];
+
+        // Check if source is a collection (+ prefix)
+        if (source_arg.size() > 1 && source_arg[0] == '+')
+        {
+            auto collection_name = source_arg.substr(1);
+            return install_collection(collection_name, args);
+        }
 
         // Check if source is a local path
         if (std::filesystem::exists(source_arg))
@@ -346,6 +353,84 @@ namespace uniconv::cli::commands
         return 0;
     }
 
+    int PluginCommand::install_collection(const std::string &collection_name,
+                                          const ParsedArgs &args)
+    {
+        auto client = make_registry_client();
+
+        if (!args.core_options.quiet)
+        {
+            std::cout << "Fetching collection '" << collection_name << "'...\n";
+        }
+
+        auto collection = client->find_collection(collection_name);
+        if (!collection)
+        {
+            std::cerr << "Error: Collection not found: " << collection_name << "\n";
+            return 1;
+        }
+
+        if (!args.core_options.quiet)
+        {
+            std::cout << "Collection '" << collection_name << "': "
+                      << collection->description << "\n";
+            std::cout << "Installing " << collection->plugins.size() << " plugin(s)...\n\n";
+        }
+
+        int installed = 0;
+        int failed = 0;
+
+        for (const auto &plugin_name : collection->plugins)
+        {
+            if (!args.core_options.quiet)
+            {
+                std::cout << "--- " << plugin_name << " ---\n";
+            }
+
+            int result = install_from_registry(plugin_name, std::nullopt, args);
+            if (result == 0)
+            {
+                ++installed;
+            }
+            else
+            {
+                ++failed;
+            }
+
+            if (!args.core_options.quiet)
+            {
+                std::cout << "\n";
+            }
+        }
+
+        if (!args.core_options.quiet)
+        {
+            std::cout << installed << " plugin(s) installed";
+            if (failed > 0)
+                std::cout << ", " << failed << " failed";
+            std::cout << "\n";
+        }
+
+        if (args.core_options.json_output)
+        {
+            nlohmann::json j;
+            j["success"] = (failed == 0);
+            j["collection"] = collection_name;
+            j["installed"] = installed;
+            j["failed"] = failed;
+
+            j["plugins"] = nlohmann::json::array();
+            for (const auto &p : collection->plugins)
+            {
+                j["plugins"].push_back(p);
+            }
+
+            std::cout << j.dump(2) << std::endl;
+        }
+
+        return failed > 0 ? 1 : 0;
+    }
+
     int PluginCommand::remove(const ParsedArgs &args)
     {
         if (args.subcommand.empty())
@@ -418,7 +503,7 @@ namespace uniconv::cli::commands
         auto builtin = plugin_manager_->list_plugins();
         for (const auto &p : builtin)
         {
-            if (p.id == name || p.group == name)
+            if (p.id == name || p.scope == name)
             {
                 if (args.core_options.json_output)
                 {
@@ -429,7 +514,7 @@ namespace uniconv::cli::commands
                 else
                 {
                     std::cout << "Name:        " << p.id << "\n";
-                    std::cout << "Group:       " << p.group << "\n";
+                    std::cout << "Scope:       " << p.scope << "\n";
                     std::cout << "Version:     " << p.version << "\n";
                     std::cout << "Description: " << p.description << "\n";
                     std::cout << "Source:      built-in\n";
@@ -481,7 +566,7 @@ namespace uniconv::cli::commands
         else
         {
             std::cout << "Name:        " << manifest->name << "\n";
-            std::cout << "Group:       " << manifest->group << "\n";
+            std::cout << "Scope:       " << manifest->scope << "\n";
             std::cout << "Version:     " << manifest->version << "\n";
             std::cout << "Description: " << manifest->description << "\n";
             std::cout << "Type:        " << core::plugin_interface_to_string(manifest->interface) << "\n";
@@ -746,7 +831,7 @@ namespace uniconv::cli::commands
 
         for (const auto &m : manifests)
         {
-            if (m.name == name || m.group == name || m.id() == name)
+            if (m.name == name || m.scope == name || m.id() == name)
             {
                 return m.plugin_dir;
             }

@@ -63,6 +63,10 @@ private:
                               const std::optional<std::string>& version,
                               const ParsedArgs& args);
 
+    // Install a collection of plugins
+    int install_collection(const std::string& collection_name,
+                           const ParsedArgs& args);
+
     // Parse "name@version" syntax
     static std::pair<std::string, std::optional<std::string>>
         parse_install_arg(const std::string& arg);

@@ -184,7 +184,7 @@ namespace uniconv::core
     {
         std::filesystem::path source;
         std::string target;                // "jpg", "faces", "gdrive", etc.
-        std::optional<std::string> plugin; // Optional explicit plugin group
+        std::optional<std::string> plugin; // Optional explicit plugin scope
         CoreOptions core_options;
         std::vector<std::string> plugin_options; // Options after --
 
@@ -282,7 +282,7 @@ namespace uniconv::core
     struct PluginInfo
     {
         std::string id;                         // Full ID: "image-core"
-        std::string group;                      // Group name: "image-core"
+        std::string scope;                      // Plugin scope: "image-core"
         std::vector<std::string> targets;       // Supported targets
         std::vector<std::string> input_formats; // Supported input formats
         std::string version;
@@ -297,7 +297,7 @@ namespace uniconv::core
         {
             auto j = nlohmann::json{
                 {"id", id},
-                {"group", group},
+                {"scope", scope},
                 {"targets", targets},
                 {"input_formats", input_formats},
                 {"version", version},

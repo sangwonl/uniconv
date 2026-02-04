@@ -431,7 +431,7 @@ namespace uniconv::core
 
             Result result;
             result.target = request.target;
-            result.plugin_used = manifest_.group;
+            result.plugin_used = manifest_.scope;
             result.input = request.source;
 
             // Check success field

@@ -226,6 +226,68 @@ namespace uniconv::core
         }
     };
 
+    // A collection of plugins (from collections.json)
+    struct RegistryCollection
+    {
+        std::string name;
+        std::string description;
+        std::vector<std::string> plugins;
+
+        nlohmann::json to_json() const
+        {
+            return {
+                {"name", name},
+                {"description", description},
+                {"plugins", plugins}};
+        }
+
+        static RegistryCollection from_json(const nlohmann::json &j)
+        {
+            RegistryCollection c;
+            c.name = j.at("name").get<std::string>();
+            c.description = j.value("description", "");
+            c.plugins = j.at("plugins").get<std::vector<std::string>>();
+            return c;
+        }
+    };
+
+    // The full collections.json
+    struct RegistryCollections
+    {
+        int version = 1;
+        std::vector<RegistryCollection> collections;
+
+        nlohmann::json to_json() const
+        {
+            nlohmann::json j;
+            j["version"] = version;
+
+            j["collections"] = nlohmann::json::array();
+            for (const auto &c : collections)
+            {
+                j["collections"].push_back(c.to_json());
+            }
+
+            return j;
+        }
+
+        static RegistryCollections from_json(const nlohmann::json &j)
+        {
+            RegistryCollections rc;
+            rc.version = j.value("version", 1);
+
+            if (j.contains("collections") && j.at("collections").is_array())
+            {
+                for (const auto &c_json : j.at("collections"))
+                {
+                    rc.collections.push_back(RegistryCollection::from_json(c_json));
+                }
+            }
+
+            return rc;
+        }
+    };
+
     // Installed plugin record (for installed.json)
     struct InstalledPluginRecord
     {

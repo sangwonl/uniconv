@@ -34,7 +34,7 @@ public:
     // --- Default plugin settings ---
 
     // Set default plugin for a target (e.g., "transform.jpg" -> "vips")
-    void set_default_plugin(const std::string& key, const std::string& plugin_group);
+    void set_default_plugin(const std::string& key, const std::string& plugin_scope);
 
     // Get default plugin for a target
     std::optional<std::string> get_default_plugin(const std::string& key) const;
@@ -85,7 +85,7 @@ private:
     std::filesystem::path config_dir_;
     std::filesystem::path config_file_;
 
-    // Default plugins: "etl.target" -> "plugin_group"
+    // Default plugins: "etl.target" -> "plugin_scope"
     // e.g., "transform.jpg" -> "vips", "extract.faces" -> "ai-vision"
     std::map<std::string, std::string> defaults_;
 

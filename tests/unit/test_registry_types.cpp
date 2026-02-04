@@ -110,7 +110,7 @@ TEST(PluginManifestTest, DependenciesRoundTrip)
 {
     PluginManifest m;
     m.name = "test-plugin";
-    m.group = "test-plugin";
+    m.scope = "test-plugin";
     m.version = "1.0.0";
     m.targets = {"test"};
 
