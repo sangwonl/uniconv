@@ -24,15 +24,23 @@ detect_arch() {
 }
 
 fetch_latest_version() {
-  local url="https://api.github.com/repos/${REPO}/releases/latest"
-  local response
+  local url="https://github.com/${REPO}/releases/latest"
+  local redirect_url
 
-  if ! response=$(curl -fsSL "$url" 2>&1); then
+  # Use redirect URL to extract tag name (avoids GitHub API rate limits)
+  if ! redirect_url=$(curl -fsSL -o /dev/null -w "%{url_effective}" "$url" 2>&1); then
     error "Failed to fetch latest release from GitHub." \
           "Check your internet connection or visit https://github.com/${REPO}/releases for manual download."
   fi
 
-  echo "$response" | grep '"tag_name"' | sed -E 's/.*"tag_name":[[:space:]]*"([^"]+)".*/\1/'
+  # Extract tag from redirect URL (e.g., .../releases/tag/v0.1.5 -> v0.1.5)
+  local version="${redirect_url##*/}"
+  if [ -z "$version" ] || [ "$version" = "latest" ]; then
+    error "Failed to determine latest version from GitHub." \
+          "Visit https://github.com/${REPO}/releases for manual download."
+  fi
+
+  echo "$version"
 }
 
 download_and_install() {
