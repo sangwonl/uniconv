@@ -40,14 +40,12 @@ jobs:
 
       - name: Build
         run: |
-          cd uniconv
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release ..
           cmake --build . --config Release
 
       - name: Package
         run: |
-          cd uniconv
           tar -czf "uniconv-${{ github.ref_name }}-${{ matrix.platform }}-${{ matrix.arch }}.tar.gz" \
             -C build/bin uniconv
 
@@ -55,7 +53,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: uniconv-${{ matrix.platform }}-${{ matrix.arch }}
-          path: uniconv/uniconv-*.tar.gz
+          path: uniconv-*.tar.gz
 
   release:
     needs: build
