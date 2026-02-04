@@ -42,6 +42,12 @@ uniconv "photo.heic | tee | jpg, png, webp"
 
 ## Installation
 
+### Quick install
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/uniconv/uniconv/main/install.sh | bash
+```
+
 ### Build from source
 
 **Requirements:** CMake 3.20+, a C++20 compiler (Clang 14+, GCC 12+, MSVC 17+)
