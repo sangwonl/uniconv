@@ -1,6 +1,7 @@
 #pragma once
 
 #include "pipeline.h"
+#include "execution_graph.h"
 #include "engine.h"
 #include <memory>
 #include <functional>
@@ -26,28 +27,45 @@ namespace uniconv::core
         std::shared_ptr<Engine> engine_;
         std::filesystem::path temp_dir_;
 
-        // Execute a single stage, may produce multiple outputs
-        struct StageExecutionResult
-        {
-            bool success = false;
-            std::vector<std::filesystem::path> outputs;
-            std::vector<StageResult> results;
-            std::string error;
-        };
+        // Phase 1: Build execution graph from pipeline
+        void build_graph(ExecutionGraph &graph, const Pipeline &pipeline);
 
-        StageExecutionResult execute_stage(
-            size_t stage_index,
-            const PipelineStage &stage,
-            const std::vector<std::filesystem::path> &inputs,
-            const std::filesystem::path &original_source,
-            const CoreOptions &core_options,
-            const PipelineProgressCallback &progress,
-            bool is_last_stage);
+        // Phase 2: Execute all nodes in topological order (all outputs to temp)
+        bool execute_graph(ExecutionGraph &graph,
+                          const Pipeline &pipeline,
+                          const PipelineProgressCallback &progress,
+                          PipelineResult &result);
 
-        // Handle tee: replicate input N times for next stage
-        std::vector<std::filesystem::path> handle_tee(
-            const std::filesystem::path &input,
-            size_t count);
+        // Phase 3: Finalize outputs (move/keep/delete based on full visibility)
+        // Returns false if there was an error (e.g., non-copyable format without -o)
+        bool finalize_outputs(ExecutionGraph &graph,
+                             const Pipeline &pipeline,
+                             PipelineResult &result);
+
+        // Execute a single node
+        bool execute_node(ExecutionNode &node,
+                         ExecutionGraph &graph,
+                         const Pipeline &pipeline,
+                         const PipelineProgressCallback &progress,
+                         PipelineResult &result);
+
+        // Execute tee node (just pass through)
+        bool execute_tee_node(ExecutionNode &node,
+                             ExecutionGraph &graph,
+                             PipelineResult &result);
+
+        // Execute clipboard node
+        bool execute_clipboard_node(ExecutionNode &node,
+                                   ExecutionGraph &graph,
+                                   const Pipeline &pipeline,
+                                   PipelineResult &result);
+
+        // Execute conversion node
+        bool execute_conversion_node(ExecutionNode &node,
+                                    ExecutionGraph &graph,
+                                    const Pipeline &pipeline,
+                                    const PipelineProgressCallback &progress,
+                                    PipelineResult &result);
 
         // Generate temp file path for intermediate results
         std::filesystem::path generate_temp_path(
@@ -57,18 +75,37 @@ namespace uniconv::core
             size_t element_index);
 
         // Generate final output path (current directory)
-        // Uses original_source for base name, extracts transform from intermediate input if present
         std::filesystem::path generate_final_output_path(
             const std::filesystem::path &original_source,
-            const std::filesystem::path &intermediate_input,
-            const std::string &target);
+            const std::string &target,
+            const std::string &transform_suffix);
+
+        // Resolve the -o option into an actual path
+        std::filesystem::path resolve_output_option(
+            const std::filesystem::path &original_source,
+            const std::optional<std::filesystem::path> &output_option,
+            const std::string &target,
+            const std::string &transform_suffix);
 
         // Extract transform name from intermediate temp filename
-        // Returns empty string if not a temp file pattern
         std::string extract_transform_from_temp(const std::filesystem::path &temp_path);
+
+        // Get the input path for a node (resolve from predecessor or source)
+        std::filesystem::path get_node_input(const ExecutionNode &node,
+                                            const ExecutionGraph &graph);
 
         // Cleanup temp files
         void cleanup_temp_files();
+
+        // Check if a target format can have its content copied to clipboard
+        static bool is_clipboard_content_copyable(const std::string &target);
+
+        // Check if a target is a known file format (vs a transformation like "gray")
+        static bool is_known_file_format(const std::string &target);
+
+        // Get the actual output format for a node (handles transformations)
+        std::string get_output_format(const ExecutionNode &node,
+                                      const ExecutionGraph &graph);
     };
 
 } // namespace uniconv::core

@@ -12,12 +12,13 @@ namespace uniconv::core {
 
 // A single element in a pipeline stage (e.g., "jpg --quality 90" or "jpg@vips")
 struct StageElement {
-    std::string target;                              // "jpg", "faces", "gdrive", "tee"
+    std::string target;                              // "jpg", "faces", "gdrive", "tee", "clipboard"
     std::optional<std::string> plugin;               // Explicit plugin: "vips", "ffmpeg"
     std::map<std::string, std::string> options;      // Parsed options: {"quality": "90"}
     std::vector<std::string> raw_options;            // Raw option strings for plugin
 
     bool is_tee() const { return target == "tee"; }
+    bool is_clipboard() const { return target == "clipboard"; }
 
     nlohmann::json to_json() const {
         nlohmann::json j;
@@ -39,6 +40,12 @@ struct PipelineStage {
     bool has_tee() const {
         for (const auto& elem : elements) {
             if (elem.is_tee()) return true;
+        }
+        return false;
+    }
+    bool has_clipboard() const {
+        for (const auto& elem : elements) {
+            if (elem.is_clipboard()) return true;
         }
         return false;
     }
@@ -87,6 +94,9 @@ struct Pipeline {
         if (!stages.empty() && stages.back().has_tee()) {
             return ValidationResult::fail("'tee' cannot be the last stage (needs consumers)");
         }
+
+        // Note: clipboard CAN be any stage (including first) because it receives
+        // input from either the source file or the previous stage's output
 
         // Check each stage transition
         for (size_t i = 0; i < stages.size() - 1; ++i) {
@@ -187,6 +197,7 @@ struct PipelineResult {
     bool success = false;
     std::vector<StageResult> stage_results;
     std::vector<std::filesystem::path> final_outputs;
+    std::vector<std::string> warnings;
     int64_t total_duration_ms = 0;
     std::optional<std::string> error;
 
@@ -221,6 +232,10 @@ struct PipelineResult {
 
         if (error) {
             j["error"] = *error;
+        }
+
+        if (!warnings.empty()) {
+            j["warnings"] = warnings;
         }
 
         return j;

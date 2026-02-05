@@ -186,6 +186,12 @@ int main(int argc, char **argv)
             }
             else
             {
+                // Print any warnings
+                for (const auto &warning : result.warnings)
+                {
+                    output->warning(warning);
+                }
+
                 // Print human-readable output
                 for (const auto &sr : result.stage_results)
                 {
@@ -209,6 +215,10 @@ int main(int argc, char **argv)
                     {
                         output->info("  -> " + out.string());
                     }
+                }
+                else if (result.error)
+                {
+                    output->error(*result.error);
                 }
             }
             return result.success ? 0 : 1;

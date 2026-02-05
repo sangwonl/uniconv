@@ -1,4 +1,7 @@
 #include "pipeline_executor.h"
+#include "builtins/clipboard.h"
+#include <algorithm>
+#include <cctype>
 #include <chrono>
 #include <sstream>
 
@@ -16,96 +19,29 @@ namespace uniconv::core
         const Pipeline &pipeline,
         const PipelineProgressCallback &progress)
     {
-
         auto start_time = std::chrono::steady_clock::now();
 
         PipelineResult final_result;
         final_result.success = false;
 
-        // Start with the original input
-        std::vector<std::filesystem::path> current_inputs = {pipeline.source};
+        // Phase 1: Build execution graph
+        ExecutionGraph graph;
+        build_graph(graph, pipeline);
 
-        // Execute each stage sequentially
-        for (size_t stage_idx = 0; stage_idx < pipeline.stages.size(); ++stage_idx)
+        // Phase 2: Execute all nodes (outputs go to temp)
+        if (!execute_graph(graph, pipeline, progress, final_result))
         {
-            const auto &stage = pipeline.stages[stage_idx];
-
-            // Handle tee operation - if this stage has tee, replicate inputs for next stage
-            if (stage.has_tee())
-            {
-                if (current_inputs.size() != 1)
-                {
-                    final_result.error = "tee operation requires exactly one input";
-                    cleanup_temp_files();
-                    return final_result;
-                }
-
-                // Determine tee count from next stage's element count
-                size_t tee_count = 1;
-                if (stage_idx + 1 < pipeline.stages.size())
-                {
-                    tee_count = pipeline.stages[stage_idx + 1].element_count();
-                }
-
-                current_inputs = handle_tee(current_inputs[0], tee_count);
-
-                // Add tee stage result
-                StageResult tee_result;
-                tee_result.stage_index = stage_idx;
-                tee_result.target = "tee";
-                tee_result.plugin_used = "builtin:tee";
-                tee_result.input = current_inputs[0];
-                tee_result.output = current_inputs[0];
-                tee_result.status = ResultStatus::Success;
-                tee_result.duration_ms = 0;
-                final_result.stage_results.push_back(tee_result);
-
-                continue; // tee doesn't execute anything, just replicates paths
-            }
-
-            // Validate input/element count
-            if (!stage.elements.empty() &&
-                current_inputs.size() != stage.elements.size())
-            {
-                std::ostringstream oss;
-                oss << "Stage " << stage_idx << " has " << stage.elements.size()
-                    << " elements but received " << current_inputs.size() << " inputs";
-                final_result.error = oss.str();
-                cleanup_temp_files();
-                return final_result;
-            }
-
-            // Execute the stage
-            bool is_last_stage = (stage_idx == pipeline.stages.size() - 1);
-            auto stage_result = execute_stage(
-                stage_idx,
-                stage,
-                current_inputs,
-                pipeline.source,
-                pipeline.core_options,
-                progress,
-                is_last_stage);
-
-            if (!stage_result.success)
-            {
-                final_result.error = stage_result.error;
-                final_result.stage_results = std::move(stage_result.results);
-                cleanup_temp_files();
-                return final_result;
-            }
-
-            // Append stage results
-            final_result.stage_results.insert(
-                final_result.stage_results.end(),
-                stage_result.results.begin(),
-                stage_result.results.end());
-
-            // Update inputs for next stage
-            current_inputs = std::move(stage_result.outputs);
+            cleanup_temp_files();
+            return final_result;
         }
 
-        // Final outputs
-        final_result.final_outputs = std::move(current_inputs);
+        // Phase 3: Finalize outputs (with full visibility of graph)
+        if (!finalize_outputs(graph, pipeline, final_result))
+        {
+            cleanup_temp_files();
+            return final_result;
+        }
+
         final_result.success = true;
 
         auto end_time = std::chrono::steady_clock::now();
@@ -117,158 +53,405 @@ namespace uniconv::core
         return final_result;
     }
 
-    PipelineExecutor::StageExecutionResult PipelineExecutor::execute_stage(
-        size_t stage_index,
-        const PipelineStage &stage,
-        const std::vector<std::filesystem::path> &inputs,
-        const std::filesystem::path &original_source,
-        const CoreOptions &core_options,
-        const PipelineProgressCallback &progress,
-        bool is_last_stage)
+    void PipelineExecutor::build_graph(ExecutionGraph &graph, const Pipeline &pipeline)
     {
+        graph.build_from_pipeline(pipeline);
+    }
 
-        StageExecutionResult result;
-        result.success = true;
+    bool PipelineExecutor::execute_graph(
+        ExecutionGraph &graph,
+        const Pipeline &pipeline,
+        const PipelineProgressCallback &progress,
+        PipelineResult &result)
+    {
+        // Get execution order (topological sort)
+        auto order = graph.execution_order();
 
-        // If no elements, just pass through inputs
-        if (stage.elements.empty())
+        for (size_t node_id : order)
         {
-            result.outputs = inputs;
-            return result;
+            auto &node = graph.node(node_id);
+            if (!execute_node(node, graph, pipeline, progress, result))
+            {
+                return false;
+            }
         }
 
-        // Execute each element (parallel conceptually, but sequentially for now)
-        for (size_t elem_idx = 0; elem_idx < stage.elements.size(); ++elem_idx)
+        return true;
+    }
+
+    bool PipelineExecutor::execute_node(
+        ExecutionNode &node,
+        ExecutionGraph &graph,
+        const Pipeline &pipeline,
+        const PipelineProgressCallback &progress,
+        PipelineResult &result)
+    {
+        if (node.is_tee)
         {
-            const auto &element = stage.elements[elem_idx];
-            const auto &input = inputs[elem_idx];
+            return execute_tee_node(node, graph, result);
+        }
+        else if (node.is_clipboard)
+        {
+            return execute_clipboard_node(node, graph, pipeline, result);
+        }
+        else
+        {
+            return execute_conversion_node(node, graph, pipeline, progress, result);
+        }
+    }
 
-            // Progress callback
-            if (progress)
+    bool PipelineExecutor::execute_tee_node(
+        ExecutionNode &node,
+        ExecutionGraph &graph,
+        PipelineResult &result)
+    {
+        // Tee just passes through - get input from predecessor
+        node.input = get_node_input(node, graph);
+        node.temp_output = node.input; // Tee outputs same as input
+        node.executed = true;
+        node.status = ResultStatus::Success;
+
+        // Record stage result
+        StageResult stage_result;
+        stage_result.stage_index = node.stage_idx;
+        stage_result.target = "tee";
+        stage_result.plugin_used = "builtin:tee";
+        stage_result.input = node.input;
+        stage_result.output = node.temp_output;
+        stage_result.status = ResultStatus::Success;
+        stage_result.duration_ms = 0;
+        result.stage_results.push_back(stage_result);
+
+        return true;
+    }
+
+    bool PipelineExecutor::execute_clipboard_node(
+        ExecutionNode &node,
+        ExecutionGraph &graph,
+        [[maybe_unused]] const Pipeline &pipeline,
+        PipelineResult &result)
+    {
+        node.input = get_node_input(node, graph);
+
+        // No validation needed here - format validation happens in finalize phase
+        // where we have full visibility of -o option and can give appropriate error
+
+        // Execute clipboard builtin
+        auto clipboard_result = builtins::Clipboard::execute(node.input);
+
+        node.temp_output = clipboard_result.output; // Pass-through
+        node.executed = true;
+        node.plugin_used = "builtin:clipboard";
+
+        // Check if content was actually copied (not just path)
+        std::string ext = node.input.extension().string();
+        std::string format;
+        if (ext == ".tmp")
+        {
+            format = extract_transform_from_temp(node.input);
+        }
+        else if (!ext.empty() && ext[0] == '.')
+        {
+            format = ext.substr(1);
+        }
+        node.content_copied_to_clipboard = is_clipboard_content_copyable(format);
+
+        // Record stage result
+        StageResult stage_result;
+        stage_result.stage_index = node.stage_idx;
+        stage_result.target = "clipboard";
+        stage_result.plugin_used = "builtin:clipboard";
+        stage_result.input = node.input;
+        stage_result.output = clipboard_result.output;
+        stage_result.status = clipboard_result.success ? ResultStatus::Success : ResultStatus::Error;
+        stage_result.duration_ms = 0;
+        if (!clipboard_result.success)
+        {
+            stage_result.error = clipboard_result.error;
+        }
+        result.stage_results.push_back(stage_result);
+
+        if (!clipboard_result.success)
+        {
+            node.status = ResultStatus::Error;
+            node.error = clipboard_result.error;
+            result.error = clipboard_result.error;
+            return false;
+        }
+
+        node.status = ResultStatus::Success;
+        return true;
+    }
+
+    bool PipelineExecutor::execute_conversion_node(
+        ExecutionNode &node,
+        ExecutionGraph &graph,
+        const Pipeline &pipeline,
+        const PipelineProgressCallback &progress,
+        PipelineResult &result)
+    {
+        node.input = get_node_input(node, graph);
+
+        // Progress callback
+        if (progress)
+        {
+            std::ostringstream desc;
+            desc << "Stage " << node.stage_idx << ", Element " << node.element_idx
+                 << ": " << node.target;
+            progress(node.stage_idx, node.element_idx, desc.str());
+        }
+
+        // Always output to temp during execution phase
+        node.temp_output = generate_temp_path(
+            node.input,
+            node.target,
+            node.stage_idx,
+            node.element_idx);
+
+        // Build request
+        Request request;
+        request.source = node.input;
+        request.target = node.target;
+        request.plugin = node.plugin;
+        request.core_options = pipeline.core_options;
+        request.core_options.output = node.temp_output;
+        request.plugin_options = node.plugin_options;
+
+        // Execute through engine
+        auto etl_result = engine_->execute(request);
+
+        // Use actual output from plugin if available
+        std::filesystem::path actual_output = etl_result.output.value_or(node.temp_output);
+        node.temp_output = actual_output;
+        node.plugin_used = etl_result.plugin_used;
+        node.executed = true;
+
+        // Record stage result
+        StageResult stage_result;
+        stage_result.stage_index = node.stage_idx;
+        stage_result.target = node.target;
+        stage_result.plugin_used = etl_result.plugin_used;
+        stage_result.input = node.input;
+        stage_result.output = actual_output;
+        stage_result.status = etl_result.status;
+        stage_result.error = etl_result.error;
+        result.stage_results.push_back(stage_result);
+
+        if (etl_result.status != ResultStatus::Success)
+        {
+            node.status = ResultStatus::Error;
+            node.error = etl_result.error.value_or("Unknown error");
+            result.error = node.error;
+            return false;
+        }
+
+        node.status = ResultStatus::Success;
+        return true;
+    }
+
+    bool PipelineExecutor::finalize_outputs(
+        ExecutionGraph &graph,
+        const Pipeline &pipeline,
+        PipelineResult &result)
+    {
+        // Get all file-producing nodes (not builtins)
+        auto file_nodes = graph.file_producing_nodes();
+
+        for (size_t node_id : file_nodes)
+        {
+            auto &node = graph.node(node_id);
+
+            // Skip nodes that didn't execute successfully
+            if (node.status != ResultStatus::Success)
             {
-                std::ostringstream desc;
-                desc << "Stage " << stage_index << ", Element " << elem_idx
-                     << ": " << element.target;
-                progress(stage_index, elem_idx, desc.str());
+                continue;
             }
 
-            // Determine output path
-            std::filesystem::path output_path;
-            auto output_it = element.options.find("output");
-            if (output_it != element.options.end() && !output_it->second.empty())
-            {
-                // Explicit output specified in pipeline element (e.g., jpg --output foo.jpg)
-                output_path = output_it->second;
-            }
-            else if (is_last_stage && core_options.output.has_value())
-            {
-                // Last stage with CLI -o option specified
-                const auto &out_path = *core_options.output;
+            // Determine if this node needs a file output
+            bool is_terminal = node.is_terminal();
+            bool only_clipboard_consumer = graph.is_only_consumed_by_clipboard(node_id);
+            bool content_was_copied = graph.was_content_copied_to_clipboard(node_id);
+            bool clipboard_has_save = graph.clipboard_consumer_has_save(node_id);
+            bool has_output_option = pipeline.core_options.output.has_value();
 
-                // Check if output is a directory (ends with / or is existing directory)
-                bool is_directory = false;
-                std::string path_str = out_path.string();
-                if (!path_str.empty() && (path_str.back() == '/' || path_str.back() == '\\'))
-                {
-                    is_directory = true;
-                }
-                else if (std::filesystem::is_directory(out_path))
-                {
-                    is_directory = true;
-                }
+            // Decision logic for final output
+            bool should_create_file = true;
 
-                if (is_directory)
+            if (only_clipboard_consumer)
+            {
+                if (content_was_copied)
                 {
-                    // Directory specified: use original source filename + transform suffix + target extension
-                    output_path = out_path / original_source.stem();
-                    std::string transform = extract_transform_from_temp(input);
-                    if (!transform.empty())
-                    {
-                        output_path += "_" + transform;
-                    }
-                    output_path += "." + element.target;
-                }
-                else if (out_path.has_extension())
-                {
-                    // Has extension: use as-is
-                    output_path = out_path;
+                    // Content-copyable format (image/text)
+                    // Default: no file (clipboard has content)
+                    // With -o or --save: create file
+                    should_create_file = has_output_option || clipboard_has_save;
                 }
                 else
                 {
-                    // No extension: append target as extension
-                    output_path = out_path;
-                    output_path += "." + element.target;
+                    // Non-content-copyable format (video/binary)
+                    // Must have -o or --save to specify where to save
+                    if (!has_output_option && !clipboard_has_save)
+                    {
+                        std::string output_format = get_output_format(node, graph);
+                        result.error = "clipboard cannot copy '" + output_format +
+                                       "' content directly; use -o or --save to save the file";
+                        result.success = false;
+                        return false;
+                    }
+                    should_create_file = true;
                 }
             }
-            else if (is_last_stage)
+
+            if (!should_create_file)
             {
-                // Last stage: output to current directory (use original source name + transform suffix)
-                output_path = generate_final_output_path(original_source, input, element.target);
+                // Don't create file - temp will be cleaned up
+                continue;
+            }
+
+            // Determine final output path
+            std::filesystem::path final_path;
+
+            // Check for explicit output in node options
+            auto output_it = node.options.find("output");
+            if (output_it != node.options.end() && !output_it->second.empty())
+            {
+                final_path = output_it->second;
+            }
+            else if (is_terminal || only_clipboard_consumer)
+            {
+                // Terminal node or node that only feeds clipboard - this is a "final" output
+                std::string transform = extract_transform_from_temp(node.temp_output);
+
+                // Get actual output format (handles transformations like "gray")
+                std::string output_format = get_output_format(node, graph);
+
+                if (pipeline.core_options.output.has_value())
+                {
+                    final_path = resolve_output_option(
+                        graph.source(),
+                        pipeline.core_options.output,
+                        output_format,
+                        transform);
+                }
+                else
+                {
+                    final_path = generate_final_output_path(
+                        graph.source(),
+                        output_format,
+                        transform);
+                }
             }
             else
             {
-                // Intermediate result: use temp directory
-                output_path = generate_temp_path(
-                    input,
-                    element.target,
-                    stage_index,
-                    elem_idx);
+                // Intermediate node - keep in temp (will be used by consumers)
+                continue;
             }
 
-            // Build request
-            Request request;
-            request.source = input;
-            request.target = element.target;
-            request.plugin = element.plugin;
-            request.core_options = core_options;
-            request.core_options.output = output_path;
-            request.plugin_options = element.raw_options;
-
-            // Execute through engine
-            auto etl_result = engine_->execute(request);
-
-            // Use the actual output path from plugin result if available
-            std::filesystem::path actual_output = etl_result.output.value_or(output_path);
-
-            // Convert to StageResult
-            StageResult stage_result;
-            stage_result.stage_index = stage_index;
-            stage_result.target = element.target;
-            stage_result.plugin_used = etl_result.plugin_used;
-            stage_result.input = input;
-            stage_result.output = actual_output;
-            stage_result.status = etl_result.status;
-            stage_result.error = etl_result.error;
-            // Note: duration_ms would need to be tracked separately
-
-            result.results.push_back(std::move(stage_result));
-
-            if (etl_result.status != ResultStatus::Success)
+            // Move temp file to final location
+            try
             {
-                result.success = false;
-                result.error = etl_result.error.value_or("Unknown error");
-                return result;
-            }
+                // Ensure parent directory exists
+                if (final_path.has_parent_path())
+                {
+                    std::filesystem::create_directories(final_path.parent_path());
+                }
 
-            result.outputs.push_back(actual_output);
+                // Check if we need to overwrite
+                if (std::filesystem::exists(final_path))
+                {
+                    if (pipeline.core_options.force)
+                    {
+                        std::filesystem::remove(final_path);
+                    }
+                    // If not force, rename will fail - let it happen naturally
+                }
+
+                std::filesystem::rename(node.temp_output, final_path);
+                node.final_output = final_path;
+
+                // Update the stage result with final path
+                for (auto &sr : result.stage_results)
+                {
+                    if (sr.stage_index == node.stage_idx &&
+                        sr.target == node.target &&
+                        sr.output == node.temp_output)
+                    {
+                        sr.output = final_path;
+                        break;
+                    }
+                }
+
+                result.final_outputs.push_back(final_path);
+
+                // For non-content-copyable formats consumed by clipboard,
+                // copy the final path to clipboard (not the temp path)
+                if (only_clipboard_consumer && !content_was_copied)
+                {
+                    builtins::Clipboard::copy_path(final_path);
+                }
+            }
+            catch (const std::filesystem::filesystem_error &e)
+            {
+                // If rename fails, try copy + delete
+                try
+                {
+                    std::filesystem::copy_file(node.temp_output, final_path,
+                                               std::filesystem::copy_options::overwrite_existing);
+                    std::filesystem::remove(node.temp_output);
+                    node.final_output = final_path;
+
+                    for (auto &sr : result.stage_results)
+                    {
+                        if (sr.stage_index == node.stage_idx &&
+                            sr.target == node.target &&
+                            sr.output == node.temp_output)
+                        {
+                            sr.output = final_path;
+                            break;
+                        }
+                    }
+
+                    result.final_outputs.push_back(final_path);
+
+                    // For non-content-copyable formats consumed by clipboard,
+                    // copy the final path to clipboard (not the temp path)
+                    if (only_clipboard_consumer && !content_was_copied)
+                    {
+                        builtins::Clipboard::copy_path(final_path);
+                    }
+                }
+                catch (const std::filesystem::filesystem_error &)
+                {
+                    // Keep temp file, add to outputs
+                    node.final_output = node.temp_output;
+                    result.final_outputs.push_back(node.temp_output);
+                }
+            }
         }
 
-        return result;
+        return true;
     }
 
-    std::vector<std::filesystem::path> PipelineExecutor::handle_tee(
-        const std::filesystem::path &input,
-        size_t count)
+    std::filesystem::path PipelineExecutor::get_node_input(
+        const ExecutionNode &node,
+        const ExecutionGraph &graph)
     {
-
-        // Just replicate the path N times
-        // No actual file duplication needed - each subsequent stage will read from same input
-        std::vector<std::filesystem::path> outputs;
-        for (size_t i = 0; i < count; ++i)
+        // If node has explicit input path, use it
+        if (!node.input.empty())
         {
-            outputs.push_back(input);
+            return node.input;
         }
-        return outputs;
+
+        // Otherwise, get from predecessor
+        if (!node.input_nodes.empty())
+        {
+            // Use first predecessor's output
+            const auto &pred = graph.node(node.input_nodes[0]);
+            return pred.temp_output;
+        }
+
+        // Fallback to source
+        return graph.source();
     }
 
     std::filesystem::path PipelineExecutor::generate_temp_path(
@@ -277,7 +460,6 @@ namespace uniconv::core
         size_t stage_index,
         size_t element_index)
     {
-
         // Format: temp_dir / "stage{idx}_elem{idx}_{target}_{input_stem}.tmp"
         std::ostringstream filename;
         filename << "stage" << stage_index
@@ -289,10 +471,77 @@ namespace uniconv::core
         return temp_dir_ / filename.str();
     }
 
+    std::filesystem::path PipelineExecutor::generate_final_output_path(
+        const std::filesystem::path &original_source,
+        const std::string &target,
+        const std::string &transform_suffix)
+    {
+        // Output to current directory
+        std::filesystem::path output = std::filesystem::current_path();
+
+        output /= original_source.stem();
+        if (!transform_suffix.empty())
+        {
+            output += "_" + transform_suffix;
+        }
+        output += "." + target;
+
+        return output;
+    }
+
+    std::filesystem::path PipelineExecutor::resolve_output_option(
+        const std::filesystem::path &original_source,
+        const std::optional<std::filesystem::path> &output_option,
+        const std::string &target,
+        const std::string &transform_suffix)
+    {
+        if (!output_option.has_value())
+        {
+            return generate_final_output_path(original_source, target, transform_suffix);
+        }
+
+        const auto &out_path = *output_option;
+
+        // Check if output is a directory
+        bool is_directory = false;
+        std::string path_str = out_path.string();
+        if (!path_str.empty() && (path_str.back() == '/' || path_str.back() == '\\'))
+        {
+            is_directory = true;
+        }
+        else if (std::filesystem::is_directory(out_path))
+        {
+            is_directory = true;
+        }
+
+        if (is_directory)
+        {
+            // Directory: use original stem + transform suffix + target extension
+            std::filesystem::path output = out_path / original_source.stem();
+            if (!transform_suffix.empty())
+            {
+                output += "_" + transform_suffix;
+            }
+            output += "." + target;
+            return output;
+        }
+        else if (out_path.has_extension())
+        {
+            // Has extension: use as-is
+            return out_path;
+        }
+        else
+        {
+            // No extension: append target as extension
+            std::filesystem::path output = out_path;
+            output += "." + target;
+            return output;
+        }
+    }
+
     std::string PipelineExecutor::extract_transform_from_temp(
         const std::filesystem::path &temp_path)
     {
-
         // Pattern: stage{N}_elem{M}_{target}_{stem}.tmp
         // We want to extract {target}
         std::string stem = temp_path.stem().string();
@@ -304,7 +553,6 @@ namespace uniconv::core
         }
 
         // Find positions: stage{N}_elem{M}_{target}_{rest}
-        // Skip "stage{N}_elem{M}_" prefix to find the transform
         size_t first_underscore = stem.find('_');
         if (first_underscore == std::string::npos)
             return "";
@@ -319,29 +567,6 @@ namespace uniconv::core
 
         // Extract transform (between second and third underscore)
         return stem.substr(second_underscore + 1, third_underscore - second_underscore - 1);
-    }
-
-    std::filesystem::path PipelineExecutor::generate_final_output_path(
-        const std::filesystem::path &original_source,
-        const std::filesystem::path &intermediate_input,
-        const std::string &target)
-    {
-
-        // Output to current directory
-        // Format: {original_stem}_{transform}.{target} if transform exists
-        //         {original_stem}.{target} otherwise
-        std::filesystem::path output = std::filesystem::current_path();
-
-        std::string transform = extract_transform_from_temp(intermediate_input);
-
-        output /= original_source.stem();
-        if (!transform.empty())
-        {
-            output += "_" + transform;
-        }
-        output += "." + target;
-
-        return output;
     }
 
     void PipelineExecutor::cleanup_temp_files()
@@ -364,6 +589,116 @@ namespace uniconv::core
         {
             // Ignore cleanup errors
         }
+    }
+
+    // Known file format extensions
+    static const std::vector<std::string> known_file_formats = {
+        // Image formats
+        "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif",
+        "ico", "svg", "raw", "cr2", "nef", "arw",
+        // Video formats
+        "mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v", "mpeg", "mpg",
+        "3gp", "ogv",
+        // Audio formats
+        "mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus",
+        // Document formats
+        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
+        // Text formats
+        "txt", "md", "json", "xml", "csv", "html", "htm", "yaml", "yml", "log",
+        "text", "rtf"};
+
+    bool PipelineExecutor::is_clipboard_content_copyable(const std::string &target)
+    {
+        // Image formats - clipboard can copy actual image data
+        static const std::vector<std::string> image_formats = {
+            "jpg", "jpeg", "png", "gif", "bmp", "tiff", "webp"};
+
+        // Text formats - clipboard can copy actual text content
+        static const std::vector<std::string> text_formats = {
+            "txt", "md", "json", "xml", "csv", "html", "htm",
+            "yaml", "yml", "log", "text"};
+
+        // Convert target to lowercase for comparison
+        std::string lower_target = target;
+        std::transform(lower_target.begin(), lower_target.end(), lower_target.begin(),
+                       [](unsigned char c)
+                       { return std::tolower(c); });
+
+        for (const auto &fmt : image_formats)
+        {
+            if (lower_target == fmt)
+                return true;
+        }
+
+        for (const auto &fmt : text_formats)
+        {
+            if (lower_target == fmt)
+                return true;
+        }
+
+        return false;
+    }
+
+    bool PipelineExecutor::is_known_file_format(const std::string &target)
+    {
+        std::string lower_target = target;
+        std::transform(lower_target.begin(), lower_target.end(), lower_target.begin(),
+                       [](unsigned char c)
+                       { return std::tolower(c); });
+
+        for (const auto &fmt : known_file_formats)
+        {
+            if (lower_target == fmt)
+                return true;
+        }
+        return false;
+    }
+
+    std::string PipelineExecutor::get_output_format(
+        const ExecutionNode &node,
+        const ExecutionGraph &graph)
+    {
+        // If target is a known file format, use it
+        if (is_known_file_format(node.target))
+        {
+            return node.target;
+        }
+
+        // Otherwise, target is a transformation (e.g., "gray", "resize")
+        // Use the input file's format
+        std::filesystem::path input_path = node.input;
+        if (input_path.empty() && !node.input_nodes.empty())
+        {
+            // Get from predecessor
+            const auto &pred = graph.node(node.input_nodes[0]);
+            input_path = pred.temp_output;
+        }
+        if (input_path.empty())
+        {
+            input_path = graph.source();
+        }
+
+        // Extract format from input path
+        std::string ext = input_path.extension().string();
+        if (ext == ".tmp")
+        {
+            // Temp file - extract format from filename pattern
+            std::string format = extract_transform_from_temp(input_path);
+            if (!format.empty() && is_known_file_format(format))
+            {
+                return format;
+            }
+            // Fallback: look at original source
+            ext = graph.source().extension().string();
+        }
+
+        // Remove leading dot
+        if (!ext.empty() && ext[0] == '.')
+        {
+            ext = ext.substr(1);
+        }
+
+        return ext;
     }
 
 } // namespace uniconv::core

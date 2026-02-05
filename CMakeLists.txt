@@ -64,8 +64,10 @@ add_executable(uniconv
     src/core/plugin_loader_native.h
     src/core/plugin_loader_native.cpp
     src/core/pipeline_executor.cpp
+    src/core/execution_graph.cpp
     src/plugins/plugin_interface.h
     src/builtins/tee.cpp
+    src/builtins/clipboard.cpp
     src/cli/parser.h
     src/cli/parser.cpp
     src/cli/pipeline_parser.cpp
