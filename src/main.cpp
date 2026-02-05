@@ -10,11 +10,23 @@
 #include "core/preset_manager.h"
 #include "core/config_manager.h"
 #include "core/pipeline_executor.h"
+#include "core/output/output.h"
+#include "core/output/console_output.h"
+#include "core/output/json_output.h"
 #include <uniconv/version.h>
 #include <iostream>
 #include <memory>
 
 using namespace uniconv;
+
+std::shared_ptr<core::output::IOutput> create_output(const cli::ParsedArgs& args) {
+    if (args.core_options.json_output) {
+        return std::make_shared<core::output::JsonOutput>(
+            std::cout, std::cerr, args.core_options.verbose, args.core_options.quiet);
+    }
+    return std::make_shared<core::output::ConsoleOutput>(
+        std::cout, std::cerr, args.core_options.verbose, args.core_options.quiet);
+}
 
 int main(int argc, char **argv)
 {
@@ -40,9 +52,14 @@ int main(int argc, char **argv)
         }
         catch (const CLI::ParseError &e)
         {
-            std::cerr << "Error: " << e.what() << "\n";
+            auto output = create_output(args);
+            output->error(e.what());
+            output->info("Run 'uniconv --help' for usage information");
             return 1;
         }
+
+        // Create output based on args
+        auto output = create_output(args);
 
         // Route to appropriate command handler
         switch (args.command)
@@ -66,20 +83,20 @@ int main(int argc, char **argv)
 
         case cli::Command::Info:
         {
-            cli::commands::InfoCommand cmd(engine);
+            cli::commands::InfoCommand cmd(engine, output);
             return cmd.execute(args);
         }
 
         case cli::Command::Formats:
         {
             auto pm = std::make_shared<core::PluginManager>();
-            cli::commands::FormatsCommand cmd(pm);
+            cli::commands::FormatsCommand cmd(pm, output);
             return cmd.execute(args);
         }
 
         case cli::Command::Preset:
         {
-            cli::commands::PresetCommand cmd(preset_manager);
+            cli::commands::PresetCommand cmd(preset_manager, output);
             return cmd.execute(args);
         }
 
@@ -87,19 +104,20 @@ int main(int argc, char **argv)
         {
             cli::commands::PluginCommand cmd(
                 std::make_shared<core::PluginManager>(),
-                config_manager);
+                config_manager,
+                output);
             return cmd.execute(args);
         }
 
         case cli::Command::Config:
         {
-            cli::commands::ConfigCommand cmd(config_manager);
+            cli::commands::ConfigCommand cmd(config_manager, output);
             return cmd.execute(args);
         }
 
         case cli::Command::Update:
         {
-            cli::commands::UpdateCommand cmd;
+            cli::commands::UpdateCommand cmd(output);
             return cmd.execute(args);
         }
 
@@ -142,20 +160,20 @@ int main(int argc, char **argv)
 
             if (source.empty())
             {
-                std::cerr << "Pipeline error: No source file specified\n";
+                output->error("Pipeline error: No source file specified");
                 return 1;
             }
 
             if (pipeline_str.empty())
             {
-                std::cerr << "Pipeline error: No pipeline targets specified after '|'\n";
+                output->error("Pipeline error: No pipeline targets specified after '|'");
                 return 1;
             }
 
             auto parse_result = pipeline_parser.parse(pipeline_str, source, args.core_options);
             if (!parse_result.success)
             {
-                std::cerr << "Pipeline error: " << parse_result.error << "\n";
+                output->error("Pipeline error: " + parse_result.error);
                 return 1;
             }
 
@@ -164,32 +182,32 @@ int main(int argc, char **argv)
 
             if (args.core_options.json_output)
             {
-                std::cout << result.to_json().dump(2) << std::endl;
+                output->data(result.to_json());
             }
             else
             {
                 // Print human-readable output
                 for (const auto &sr : result.stage_results)
                 {
-                    std::cout << "Stage " << sr.stage_index << ": " << sr.target;
+                    std::string status_msg = "Stage " + std::to_string(sr.stage_index) + ": " + sr.target;
                     if (sr.status == core::ResultStatus::Success)
                     {
-                        std::cout << " OK";
+                        status_msg += " OK";
                     }
                     else
                     {
-                        std::cout << " FAIL";
+                        status_msg += " FAIL";
                         if (sr.error)
-                            std::cout << " - " << *sr.error;
+                            status_msg += " - " + *sr.error;
                     }
-                    std::cout << "\n";
+                    output->info(status_msg);
                 }
                 if (result.success)
                 {
-                    std::cout << "\nPipeline completed successfully\n";
+                    output->success("Pipeline completed successfully");
                     for (const auto &out : result.final_outputs)
                     {
-                        std::cout << "  -> " << out.string() << "\n";
+                        output->info("  -> " + out.string());
                     }
                 }
             }
@@ -198,8 +216,8 @@ int main(int argc, char **argv)
 
         case cli::Command::Interactive:
             // Interactive mode - placeholder for future
-            std::cerr << "Interactive mode not yet implemented\n";
-            std::cerr << "Use pipeline syntax: uniconv <source> | <target>\n";
+            output->error("Interactive mode not yet implemented");
+            output->info("Use pipeline syntax: uniconv <source> | <target>");
             return 1;
 
         default:

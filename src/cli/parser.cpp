@@ -13,16 +13,14 @@ namespace uniconv::cli
         ParsedArgs args;
 
         CLI::App app{"uniconv - Universal Converter & Content Intelligence Tool"};
-        app.usage("uniconv [OPTIONS] \"<source> | <target> [target-options] | ...\"\n"
-                  "       uniconv [OPTIONS] <subcommand>\n\n"
-                  "Pipeline Examples:\n"
-                  "  uniconv \"photo.heic | jpg\"                    # Convert HEIC to JPG\n"
-                  "  uniconv \"photo.heic | jpg --quality 90\"       # With quality option\n"
-                  "  uniconv \"photo.heic | jpg | tee | gdrive, s3\" # Multi-stage with branching\n"
-                  "  uniconv -o out.png \"photo.jpg | png\"          # Specify output path");
         app.set_version_flag("-v,--version", UNICONV_VERSION);
         app.set_help_flag("-h,--help", "Show help");
         app.allow_extras(true); // Allow remaining args for pipeline
+        app.footer("\nPipeline Examples:\n"
+                   "  uniconv \"photo.heic | jpg\"                    # Convert HEIC to JPG\n"
+                   "  uniconv \"photo.heic | jpg --quality 90\"       # With quality option\n"
+                   "  uniconv \"photo.heic | jpg | tee | gdrive, s3\" # Multi-stage with branching\n"
+                   "  uniconv -o out.png \"photo.jpg | png\"          # Specify output path");
 
         setup_main_options(app, args);
         setup_subcommands(app, args);
@@ -68,13 +66,11 @@ namespace uniconv::cli
     std::string CliParser::help()
     {
         CLI::App app{"uniconv - Universal Converter & Content Intelligence Tool"};
-        app.usage("uniconv [OPTIONS] \"<source> | <target> [target-options] | ...\"\n"
-                  "uniconv [OPTIONS] <subcommand>\n\n"
-                  "Pipeline Examples:\n"
-                  "  uniconv \"photo.heic | jpg\"                    # Convert HEIC to JPG\n"
-                  "  uniconv \"photo.heic | jpg --quality 90\"       # With quality option\n"
-                  "  uniconv \"photo.heic | jpg | tee | gdrive, s3\" # Multi-stage with branching\n"
-                  "  uniconv -o out.png \"photo.jpg | png\"          # Specify output path");
+        app.footer("\nPipeline Examples:\n"
+                   "  uniconv \"photo.heic | jpg\"                    # Convert HEIC to JPG\n"
+                   "  uniconv \"photo.heic | jpg --quality 90\"       # With quality option\n"
+                   "  uniconv \"photo.heic | jpg | tee | gdrive, s3\" # Multi-stage with branching\n"
+                   "  uniconv -o out.png \"photo.jpg | png\"          # Specify output path");
         ParsedArgs dummy;
         setup_main_options(app, dummy);
         setup_subcommands(app, dummy);
@@ -110,6 +106,9 @@ namespace uniconv::cli
         // Info command
         auto *info_cmd = app.add_subcommand("info", "Show file information");
         info_cmd->add_option("file", args.subcommand_args, "File to analyze")->required();
+        info_cmd->footer("\nExamples:\n"
+                         "  uniconv info photo.jpg\n"
+                         "  uniconv --json info photo.jpg  # JSON output");
         info_cmd->callback([&args]()
                            { args.command = Command::Info; });
 
@@ -172,6 +171,9 @@ namespace uniconv::cli
 
         auto *plugin_list = plugin_cmd->add_subcommand("list", "List installed plugins");
         plugin_list->add_flag("--registry", args.list_registry, "List all plugins available in the registry");
+        plugin_list->footer("\nExamples:\n"
+                            "  uniconv plugin list              # List installed plugins\n"
+                            "  uniconv plugin list --registry   # List all available plugins");
         plugin_list->callback([&args]()
                               {
         args.command = Command::Plugin;
@@ -179,6 +181,11 @@ namespace uniconv::cli
 
         auto *plugin_install = plugin_cmd->add_subcommand("install", "Install a plugin");
         plugin_install->add_option("source", args.subcommand_args, "Plugin name[@version] or local path")->required();
+        plugin_install->footer("\nExamples:\n"
+                               "  uniconv plugin install image-convert        # Install from registry\n"
+                               "  uniconv plugin install image-convert@1.0.0  # Install specific version\n"
+                               "  uniconv plugin install ./my-plugin          # Install from local path\n"
+                               "  uniconv plugin install +core                # Install plugin collection");
         plugin_install->callback([&args]()
                                  {
         args.command = Command::Plugin;
@@ -186,6 +193,8 @@ namespace uniconv::cli
 
         auto *plugin_remove = plugin_cmd->add_subcommand("remove", "Remove a plugin");
         plugin_remove->add_option("name", args.subcommand, "Plugin name")->required();
+        plugin_remove->footer("\nExamples:\n"
+                              "  uniconv plugin remove image-convert");
         plugin_remove->callback([&args]()
                                 {
         args.command = Command::Plugin;
@@ -193,6 +202,8 @@ namespace uniconv::cli
 
         auto *plugin_info = plugin_cmd->add_subcommand("info", "Show plugin information");
         plugin_info->add_option("name", args.subcommand, "Plugin name")->required();
+        plugin_info->footer("\nExamples:\n"
+                            "  uniconv plugin info image-convert");
         plugin_info->callback([&args]()
                               {
         args.command = Command::Plugin;
@@ -200,6 +211,9 @@ namespace uniconv::cli
 
         auto *plugin_search = plugin_cmd->add_subcommand("search", "Search plugin registry");
         plugin_search->add_option("query", args.subcommand, "Search query")->required();
+        plugin_search->footer("\nExamples:\n"
+                              "  uniconv plugin search image\n"
+                              "  uniconv plugin search video");
         plugin_search->callback([&args]()
                                 {
         args.command = Command::Plugin;
@@ -207,6 +221,9 @@ namespace uniconv::cli
 
         auto *plugin_update = plugin_cmd->add_subcommand("update", "Update plugin(s)");
         plugin_update->add_option("name", args.subcommand, "Plugin name (optional, updates all if omitted)");
+        plugin_update->footer("\nExamples:\n"
+                              "  uniconv plugin update                # Update all plugins\n"
+                              "  uniconv plugin update image-convert  # Update specific plugin");
         plugin_update->callback([&args]()
                                 {
         args.command = Command::Plugin;
@@ -218,6 +235,8 @@ namespace uniconv::cli
 
         auto *plugin_deps_install = plugin_deps->add_subcommand("install", "Install dependencies for a plugin");
         plugin_deps_install->add_option("name", args.subcommand, "Plugin name")->required();
+        plugin_deps_install->footer("\nExamples:\n"
+                                    "  uniconv plugin deps install image-convert");
         plugin_deps_install->callback([&args]()
                                       {
         args.command = Command::Plugin;
@@ -226,6 +245,9 @@ namespace uniconv::cli
 
         auto *plugin_deps_check = plugin_deps->add_subcommand("check", "Check dependency status");
         plugin_deps_check->add_option("name", args.subcommand, "Plugin name (optional, checks all if omitted)");
+        plugin_deps_check->footer("\nExamples:\n"
+                                  "  uniconv plugin deps check                # Check all plugins\n"
+                                  "  uniconv plugin deps check image-convert  # Check specific plugin");
         plugin_deps_check->callback([&args]()
                                     {
         args.command = Command::Plugin;
@@ -233,6 +255,8 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "deps"); });
 
         auto *plugin_deps_clean = plugin_deps->add_subcommand("clean", "Remove orphaned dependency environments");
+        plugin_deps_clean->footer("\nExamples:\n"
+                                  "  uniconv plugin deps clean");
         plugin_deps_clean->callback([&args]()
                                     {
         args.command = Command::Plugin;
@@ -241,6 +265,8 @@ namespace uniconv::cli
 
         auto *plugin_deps_info = plugin_deps->add_subcommand("info", "Show dependency environment details");
         plugin_deps_info->add_option("name", args.subcommand, "Plugin name")->required();
+        plugin_deps_info->footer("\nExamples:\n"
+                                 "  uniconv plugin deps info image-convert");
         plugin_deps_info->callback([&args]()
                                    {
         args.command = Command::Plugin;
@@ -250,6 +276,9 @@ namespace uniconv::cli
         // Update command (self-update)
         auto *update_cmd = app.add_subcommand("update", "Update uniconv to latest version");
         update_cmd->add_flag("--check", args.update_check_only, "Only check for updates, don't install");
+        update_cmd->footer("\nExamples:\n"
+                           "  uniconv update          # Update to latest version\n"
+                           "  uniconv update --check  # Check for updates without installing");
         update_cmd->callback([&args]()
                              { args.command = Command::Update; });
 

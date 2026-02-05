@@ -1,10 +1,11 @@
 #include "config_command.h"
-#include <iostream>
+#include <sstream>
 
 namespace uniconv::cli::commands {
 
-ConfigCommand::ConfigCommand(std::shared_ptr<core::ConfigManager> config_manager)
-    : config_manager_(std::move(config_manager)) {
+ConfigCommand::ConfigCommand(std::shared_ptr<core::ConfigManager> config_manager,
+                             std::shared_ptr<core::output::IOutput> output)
+    : config_manager_(std::move(config_manager)), output_(std::move(output)) {
 }
 
 int ConfigCommand::execute(const ParsedArgs& args) {
@@ -24,51 +25,51 @@ int ConfigCommand::execute(const ParsedArgs& args) {
         return unset(args);
     }
 
-    std::cerr << "Unknown config action: " << action << "\n";
-    std::cerr << "Available actions: list, get, set, unset\n";
+    output_->error("Unknown config action: " + action);
+    output_->info("Available actions: list, get, set, unset");
     return 1;
 }
 
-int ConfigCommand::list(const ParsedArgs& args) {
+int ConfigCommand::list(const ParsedArgs& /*args*/) {
     // Load current config
     config_manager_->load();
-
-    if (args.core_options.json_output) {
-        std::cout << config_manager_->to_json().dump(2) << std::endl;
-        return 0;
-    }
 
     auto keys = config_manager_->list_keys();
 
     if (keys.empty()) {
-        std::cout << "(no configuration set)\n";
+        output_->info("(no configuration set)");
         return 0;
     }
 
-    // Print defaults
+    // Build JSON data
+    nlohmann::json j = config_manager_->to_json();
+
+    // Build text representation
+    std::ostringstream text;
     auto defaults = config_manager_->get_all_defaults();
     if (!defaults.empty()) {
-        std::cout << "Default plugins:\n";
+        text << "Default plugins:";
         for (const auto& [key, value] : defaults) {
-            std::cout << "  " << key << " = " << value << "\n";
+            text << "\n  " << key << " = " << value;
         }
     }
 
-    // Print plugin paths
     auto paths = config_manager_->get_plugin_paths();
     if (!paths.empty()) {
-        std::cout << "\nPlugin paths:\n";
+        if (!defaults.empty()) text << "\n";
+        text << "\nPlugin paths:";
         for (const auto& path : paths) {
-            std::cout << "  " << path.string() << "\n";
+            text << "\n  " << path.string();
         }
     }
 
+    output_->data(j, text.str());
     return 0;
 }
 
 int ConfigCommand::get(const ParsedArgs& args) {
     if (args.subcommand.empty()) {
-        std::cerr << "Usage: uniconv config get <key>\n";
+        output_->error("Usage: uniconv config get <key>");
         return 1;
     }
 
@@ -87,14 +88,10 @@ int ConfigCommand::get(const ParsedArgs& args) {
 
         auto value = config_manager_->get_default_plugin(lookup_key);
         if (value) {
-            if (args.core_options.json_output) {
-                nlohmann::json j;
-                j["key"] = key;
-                j["value"] = *value;
-                std::cout << j.dump(2) << std::endl;
-            } else {
-                std::cout << *value << "\n";
-            }
+            nlohmann::json j;
+            j["key"] = key;
+            j["value"] = *value;
+            output_->data(j, *value);
             return 0;
         }
     }
@@ -102,24 +99,20 @@ int ConfigCommand::get(const ParsedArgs& args) {
     // Try as generic setting
     auto value = config_manager_->get(key);
     if (value) {
-        if (args.core_options.json_output) {
-            nlohmann::json j;
-            j["key"] = key;
-            j["value"] = *value;
-            std::cout << j.dump(2) << std::endl;
-        } else {
-            std::cout << *value << "\n";
-        }
+        nlohmann::json j;
+        j["key"] = key;
+        j["value"] = *value;
+        output_->data(j, *value);
         return 0;
     }
 
-    std::cerr << "Config key not found: " << key << "\n";
+    output_->error("Config key not found: " + key);
     return 1;
 }
 
 int ConfigCommand::set(const ParsedArgs& args) {
     if (args.subcommand.empty() || args.subcommand_args.size() < 2) {
-        std::cerr << "Usage: uniconv config set <key> <value>\n";
+        output_->error("Usage: uniconv config set <key> <value>");
         return 1;
     }
 
@@ -148,28 +141,22 @@ int ConfigCommand::set(const ParsedArgs& args) {
 
     // Save config
     if (!config_manager_->save()) {
-        std::cerr << "Error: Failed to save configuration\n";
+        output_->error("Failed to save configuration");
         return 1;
     }
 
-    if (!args.core_options.quiet) {
-        std::cout << "Set " << key << " = " << value << "\n";
-    }
-
-    if (args.core_options.json_output) {
-        nlohmann::json j;
-        j["success"] = true;
-        j["key"] = key;
-        j["value"] = value;
-        std::cout << j.dump(2) << std::endl;
-    }
+    nlohmann::json j;
+    j["success"] = true;
+    j["key"] = key;
+    j["value"] = value;
+    output_->data(j, "Set " + key + " = " + value);
 
     return 0;
 }
 
 int ConfigCommand::unset(const ParsedArgs& args) {
     if (args.subcommand.empty()) {
-        std::cerr << "Usage: uniconv config unset <key>\n";
+        output_->error("Usage: uniconv config unset <key>");
         return 1;
     }
 
@@ -193,26 +180,20 @@ int ConfigCommand::unset(const ParsedArgs& args) {
     }
 
     if (!removed) {
-        std::cerr << "Config key not found: " << key << "\n";
+        output_->error("Config key not found: " + key);
         return 1;
     }
 
     // Save config
     if (!config_manager_->save()) {
-        std::cerr << "Error: Failed to save configuration\n";
+        output_->error("Failed to save configuration");
         return 1;
     }
 
-    if (!args.core_options.quiet) {
-        std::cout << "Removed " << key << "\n";
-    }
-
-    if (args.core_options.json_output) {
-        nlohmann::json j;
-        j["success"] = true;
-        j["key"] = key;
-        std::cout << j.dump(2) << std::endl;
-    }
+    nlohmann::json j;
+    j["success"] = true;
+    j["key"] = key;
+    output_->data(j, "Removed " + key);
 
     return 0;
 }

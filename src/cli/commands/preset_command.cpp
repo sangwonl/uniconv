@@ -1,12 +1,12 @@
 #include "preset_command.h"
-#include "utils/json_output.h"
-#include <iostream>
+#include <sstream>
 
 namespace uniconv::cli::commands
 {
 
-    PresetCommand::PresetCommand(std::shared_ptr<core::PresetManager> preset_manager)
-        : preset_manager_(std::move(preset_manager))
+    PresetCommand::PresetCommand(std::shared_ptr<core::PresetManager> preset_manager,
+                                 std::shared_ptr<core::output::IOutput> output)
+        : preset_manager_(std::move(preset_manager)), output_(std::move(output))
     {
     }
 
@@ -14,7 +14,7 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand_args.empty())
         {
-            std::cerr << "Error: No subcommand specified\n";
+            output_->error("No subcommand specified");
             return 1;
         }
 
@@ -33,45 +33,41 @@ namespace uniconv::cli::commands
         if (subcmd == "import")
             return import_preset(args);
 
-        std::cerr << "Error: Unknown preset subcommand: " << subcmd << "\n";
+        output_->error("Unknown preset subcommand: " + subcmd);
         return 1;
     }
 
-    int PresetCommand::list(const ParsedArgs &args)
+    int PresetCommand::list(const ParsedArgs & /*args*/)
     {
         auto presets = preset_manager_->list();
 
-        if (args.core_options.json_output)
+        nlohmann::json j = nlohmann::json::array();
+        for (const auto &p : presets)
         {
-            nlohmann::json j = nlohmann::json::array();
-            for (const auto &p : presets)
-            {
-                j.push_back(p.to_json());
-            }
-            std::cout << j.dump(2) << std::endl;
+            j.push_back(p.to_json());
+        }
+
+        std::ostringstream text;
+        if (presets.empty())
+        {
+            text << "No presets found.\n";
+            text << "Create one with: uniconv preset create <name> -t <format> [options]";
         }
         else
         {
-            if (presets.empty())
+            text << "Available presets:";
+            for (const auto &p : presets)
             {
-                std::cout << "No presets found.\n";
-                std::cout << "Create one with: uniconv preset create <name> -t <format> [options]\n";
-            }
-            else
-            {
-                std::cout << "Available presets:\n";
-                for (const auto &p : presets)
+                text << "\n  " << p.name;
+                if (!p.description.empty())
                 {
-                    std::cout << "  " << p.name;
-                    if (!p.description.empty())
-                    {
-                        std::cout << " - " << p.description;
-                    }
-                    std::cout << " (-> " << p.target << ")\n";
+                    text << " - " << p.description;
                 }
+                text << " (-> " << p.target << ")";
             }
         }
 
+        output_->data(j, text.str());
         return 0;
     }
 
@@ -79,15 +75,15 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Error: Preset name required\n";
+            output_->error("Preset name required");
             return 1;
         }
 
         // TODO: Implement preset creation from pipeline string
         // For now, presets should be created by specifying a pipeline string
         // Example: uniconv preset create instagram "jpg --quality 85 --width 1080"
-        std::cerr << "Error: Preset creation not yet implemented for pipeline syntax\n";
-        std::cerr << "Usage: uniconv preset create <name> \"<pipeline>\"\n";
+        output_->error("Preset creation not yet implemented for pipeline syntax");
+        output_->info("Usage: uniconv preset create <name> \"<pipeline>\"");
         return 1;
     }
 
@@ -95,21 +91,21 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Error: Preset name required\n";
+            output_->error("Preset name required");
             return 1;
         }
 
         if (preset_manager_->remove(args.subcommand))
         {
-            if (!args.core_options.quiet)
-            {
-                std::cout << "Deleted preset: " << args.subcommand << "\n";
-            }
+            nlohmann::json j;
+            j["success"] = true;
+            j["deleted"] = args.subcommand;
+            output_->data(j, "Deleted preset: " + args.subcommand);
             return 0;
         }
         else
         {
-            std::cerr << "Error: Preset not found: " << args.subcommand << "\n";
+            output_->error("Preset not found: " + args.subcommand);
             return 1;
         }
     }
@@ -118,46 +114,38 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Error: Preset name required\n";
+            output_->error("Preset name required");
             return 1;
         }
 
         auto preset = preset_manager_->load(args.subcommand);
         if (!preset)
         {
-            std::cerr << "Error: Preset not found: " << args.subcommand << "\n";
+            output_->error("Preset not found: " + args.subcommand);
             return 1;
         }
 
-        if (args.core_options.json_output)
+        std::ostringstream text;
+        text << "Name: " << preset->name;
+        if (!preset->description.empty())
         {
-            std::cout << preset->to_json().dump(2) << std::endl;
+            text << "\nDescription: " << preset->description;
         }
-        else
+        text << "\nTarget: " << preset->target;
+        if (preset->plugin)
         {
-            std::cout << "Name: " << preset->name << "\n";
-            if (!preset->description.empty())
+            text << "\nPlugin: " << *preset->plugin;
+        }
+        if (!preset->plugin_options.empty())
+        {
+            text << "\nOptions:";
+            for (const auto &opt : preset->plugin_options)
             {
-                std::cout << "Description: " << preset->description << "\n";
-            }
-            std::cout << "Target: " << preset->target << "\n";
-            if (preset->plugin)
-            {
-                std::cout << "Plugin: " << *preset->plugin << "\n";
-            }
-            if (!preset->plugin_options.empty())
-            {
-                std::cout << "Options: ";
-                for (size_t i = 0; i < preset->plugin_options.size(); ++i)
-                {
-                    if (i > 0)
-                        std::cout << " ";
-                    std::cout << preset->plugin_options[i];
-                }
-                std::cout << "\n";
+                text << " " << opt;
             }
         }
 
+        output_->data(preset->to_json(), text.str());
         return 0;
     }
 
@@ -165,28 +153,29 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Error: Preset name required\n";
+            output_->error("Preset name required");
             return 1;
         }
 
         if (args.subcommand_args.size() < 2)
         {
-            std::cerr << "Error: Output file required\n";
+            output_->error("Output file required");
             return 1;
         }
 
         try
         {
             preset_manager_->export_preset(args.subcommand, args.subcommand_args[1]);
-            if (!args.core_options.quiet)
-            {
-                std::cout << "Exported preset to: " << args.subcommand_args[1] << "\n";
-            }
+            nlohmann::json j;
+            j["success"] = true;
+            j["preset"] = args.subcommand;
+            j["file"] = args.subcommand_args[1];
+            output_->data(j, "Exported preset to: " + args.subcommand_args[1]);
             return 0;
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error: " << e.what() << "\n";
+            output_->error(e.what());
             return 1;
         }
     }
@@ -195,22 +184,22 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand_args.size() < 2)
         {
-            std::cerr << "Error: Input file required\n";
+            output_->error("Input file required");
             return 1;
         }
 
         try
         {
             preset_manager_->import_preset(args.subcommand_args[1]);
-            if (!args.core_options.quiet)
-            {
-                std::cout << "Imported preset from: " << args.subcommand_args[1] << "\n";
-            }
+            nlohmann::json j;
+            j["success"] = true;
+            j["file"] = args.subcommand_args[1];
+            output_->data(j, "Imported preset from: " + args.subcommand_args[1]);
             return 0;
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error: " << e.what() << "\n";
+            output_->error(e.what());
             return 1;
         }
     }

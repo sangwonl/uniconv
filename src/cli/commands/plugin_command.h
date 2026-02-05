@@ -5,6 +5,7 @@
 #include "core/dependency_checker.h"
 #include "core/dependency_installer.h"
 #include "core/installed_plugins.h"
+#include "core/output/output.h"
 #include "core/plugin_discovery.h"
 #include "core/plugin_manager.h"
 #include "core/registry_client.h"
@@ -19,7 +20,8 @@ class PluginCommand {
 public:
     PluginCommand(
         std::shared_ptr<core::PluginManager> plugin_manager,
-        std::shared_ptr<core::ConfigManager> config_manager
+        std::shared_ptr<core::ConfigManager> config_manager,
+        std::shared_ptr<core::output::IOutput> output
     );
 
     // Execute plugin subcommand
@@ -53,6 +55,7 @@ public:
 private:
     std::shared_ptr<core::PluginManager> plugin_manager_;
     std::shared_ptr<core::ConfigManager> config_manager_;
+    std::shared_ptr<core::output::IOutput> output_;
     core::PluginDiscovery discovery_;
     core::InstalledPlugins installed_;
     core::DependencyChecker dep_checker_;

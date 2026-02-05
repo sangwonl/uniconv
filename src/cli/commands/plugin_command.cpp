@@ -1,16 +1,19 @@
 #include "plugin_command.h"
 #include "utils/version_utils.h"
-#include <iostream>
+#include <functional>
 #include <iomanip>
+#include <sstream>
 
 namespace uniconv::cli::commands
 {
 
     PluginCommand::PluginCommand(
         std::shared_ptr<core::PluginManager> plugin_manager,
-        std::shared_ptr<core::ConfigManager> config_manager)
+        std::shared_ptr<core::ConfigManager> config_manager,
+        std::shared_ptr<core::output::IOutput> output)
         : plugin_manager_(std::move(plugin_manager)),
           config_manager_(std::move(config_manager)),
+          output_(std::move(output)),
           installed_(core::ConfigManager::get_default_config_dir()),
           dep_installer_(core::ConfigManager::get_default_config_dir() / "deps")
     {
@@ -55,8 +58,8 @@ namespace uniconv::cli::commands
             return deps(args);
         }
 
-        std::cerr << "Unknown plugin action: " << action << "\n";
-        std::cerr << "Available actions: list, install, remove, info, search, update, deps\n";
+        output_->error("Unknown plugin action: " + action);
+        output_->info("Available actions: list, install, remove, info, search, update, deps");
         return 1;
     }
 
@@ -73,41 +76,36 @@ namespace uniconv::cli::commands
         // Also get built-in plugins from plugin manager
         auto builtin = plugin_manager_->list_plugins();
 
-        if (args.core_options.json_output)
+        nlohmann::json j = nlohmann::json::array();
+
+        // Add built-in plugins
+        for (const auto &p : builtin)
         {
-            nlohmann::json j = nlohmann::json::array();
-
-            // Add built-in plugins
-            for (const auto &p : builtin)
-            {
-                auto pj = p.to_json();
-                pj["source"] = "built-in";
-                j.push_back(pj);
-            }
-
-            // Add discovered external plugins
-            for (const auto &m : manifests)
-            {
-                auto info = m.to_plugin_info();
-                auto pj = info.to_json();
-                pj["path"] = m.plugin_dir.string();
-                pj["interface"] = core::plugin_interface_to_string(m.iface);
-                pj["source"] = installed_.is_registry_installed(m.name) ? "registry" : "local";
-                j.push_back(pj);
-            }
-
-            std::cout << j.dump(2) << std::endl;
-            return 0;
+            auto pj = p.to_json();
+            pj["source"] = "built-in";
+            j.push_back(pj);
         }
 
-        // Table header
-        std::cout << std::left
-                  << std::setw(25) << "NAME"
-                  << std::setw(30) << "TARGETS"
-                  << std::setw(10) << "VERSION"
-                  << std::setw(12) << "SOURCE"
-                  << "\n";
-        std::cout << std::string(77, '-') << "\n";
+        // Add discovered external plugins
+        for (const auto &m : manifests)
+        {
+            auto info = m.to_plugin_info();
+            auto pj = info.to_json();
+            pj["path"] = m.plugin_dir.string();
+            pj["interface"] = core::plugin_interface_to_string(m.iface);
+            pj["source"] = installed_.is_registry_installed(m.name) ? "registry" : "local";
+            j.push_back(pj);
+        }
+
+        // Build text representation
+        std::ostringstream text;
+        text << std::left
+             << std::setw(25) << "NAME"
+             << std::setw(30) << "TARGETS"
+             << std::setw(10) << "VERSION"
+             << std::setw(12) << "SOURCE"
+             << "\n";
+        text << std::string(77, '-') << "\n";
 
         // Built-in plugins
         for (const auto &p : builtin)
@@ -122,12 +120,12 @@ namespace uniconv::cli::commands
             if (p.targets.size() > 5)
                 targets += ",...";
 
-            std::cout << std::left
-                      << std::setw(25) << p.id
-                      << std::setw(30) << targets
-                      << std::setw(10) << p.version
-                      << std::setw(12) << "built-in"
-                      << "\n";
+            text << std::left
+                 << std::setw(25) << p.id
+                 << std::setw(30) << targets
+                 << std::setw(10) << p.version
+                 << std::setw(12) << "built-in"
+                 << "\n";
         }
 
         // External plugins
@@ -145,68 +143,63 @@ namespace uniconv::cli::commands
 
             std::string source = installed_.is_registry_installed(m.name) ? "registry" : "local";
 
-            std::cout << std::left
-                      << std::setw(25) << m.id()
-                      << std::setw(30) << targets
-                      << std::setw(10) << m.version
-                      << std::setw(12) << source
-                      << "\n";
+            text << std::left
+                 << std::setw(25) << m.id()
+                 << std::setw(30) << targets
+                 << std::setw(10) << m.version
+                 << std::setw(12) << source
+                 << "\n";
         }
 
         if (builtin.empty() && manifests.empty())
         {
-            std::cout << "(no plugins installed)\n";
+            text << "(no plugins installed)\n";
         }
 
+        output_->data(j, text.str());
         return 0;
     }
 
-    int PluginCommand::list_registry(const ParsedArgs &args)
+    int PluginCommand::list_registry(const ParsedArgs & /*args*/)
     {
         auto client = make_registry_client();
 
         auto index = client->fetch_index(true);
         if (!index)
         {
-            std::cerr << "Error: Could not fetch registry index\n";
+            output_->error("Could not fetch registry index");
             return 1;
         }
 
         auto collections_result = client->fetch_collections();
 
-        if (args.core_options.json_output)
+        nlohmann::json j;
+        j["plugins"] = nlohmann::json::array();
+        for (const auto &entry : index->plugins)
         {
-            nlohmann::json j;
-
-            j["plugins"] = nlohmann::json::array();
-            for (const auto &entry : index->plugins)
-            {
-                auto pj = entry.to_json();
-                pj["installed"] = installed_.is_registry_installed(entry.name);
-                j["plugins"].push_back(pj);
-            }
-
-            j["collections"] = nlohmann::json::array();
-            if (collections_result)
-            {
-                for (const auto &c : collections_result->collections)
-                {
-                    j["collections"].push_back(c.to_json());
-                }
-            }
-
-            std::cout << j.dump(2) << std::endl;
-            return 0;
+            auto pj = entry.to_json();
+            pj["installed"] = installed_.is_registry_installed(entry.name);
+            j["plugins"].push_back(pj);
         }
 
-        // Text mode: plugins section
-        std::cout << "PLUGINS\n";
-        std::cout << std::left
-                  << std::setw(25) << "NAME"
-                  << std::setw(10) << "VERSION"
-                  << std::setw(12) << "INTERFACE"
-                  << "DESCRIPTION\n";
-        std::cout << std::string(80, '-') << "\n";
+        j["collections"] = nlohmann::json::array();
+        if (collections_result)
+        {
+            for (const auto &c : collections_result->collections)
+            {
+                j["collections"].push_back(c.to_json());
+            }
+        }
+
+        // Build text representation
+        std::ostringstream text;
+        text << "PLUGINS\n";
+        text << std::left
+             << std::setw(25) << "NAME"
+             << std::setw(10) << "VERSION"
+             << std::setw(12) << "INTERFACE"
+             << "DESCRIPTION\n";
+        text << std::string(80, '-') << "\n";
 
         for (const auto &entry : index->plugins)
         {
@@ -220,25 +213,25 @@ namespace uniconv::cli::commands
             if (desc.size() > 35)
                 desc = desc.substr(0, 32) + "...";
 
-            std::cout << std::left
-                      << std::setw(25) << name_col
-                      << std::setw(10) << entry.latest
-                      << std::setw(12) << entry.iface
-                      << desc << "\n";
+            text << std::left
+                 << std::setw(25) << name_col
+                 << std::setw(10) << entry.latest
+                 << std::setw(12) << entry.iface
+                 << desc << "\n";
         }
 
-        std::cout << "\n"
-                  << index->plugins.size() << " plugin(s) available\n";
+        text << "\n"
+             << index->plugins.size() << " plugin(s) available\n";
 
         // Collections section
         if (collections_result && !collections_result->collections.empty())
         {
-            std::cout << "\nCOLLECTIONS\n";
-            std::cout << std::left
-                      << std::setw(25) << "NAME"
-                      << std::setw(35) << "PLUGINS"
-                      << "DESCRIPTION\n";
-            std::cout << std::string(80, '-') << "\n";
+            text << "\nCOLLECTIONS\n";
+            text << std::left
+                 << std::setw(25) << "NAME"
+                 << std::setw(35) << "PLUGINS"
+                 << "DESCRIPTION\n";
+            text << std::string(80, '-') << "\n";
 
             for (const auto &c : collections_result->collections)
             {
@@ -256,16 +249,17 @@ namespace uniconv::cli::commands
                 if (desc.size() > 30)
                     desc = desc.substr(0, 27) + "...";
 
-                std::cout << std::left
-                          << std::setw(25) << c.name
-                          << std::setw(35) << plugins_str
-                          << desc << "\n";
+                text << std::left
+                     << std::setw(25) << c.name
+                     << std::setw(35) << plugins_str
+                     << desc << "\n";
             }
 
-            std::cout << "\n"
-                      << collections_result->collections.size() << " collection(s) available\n";
+            text << "\n"
+                 << collections_result->collections.size() << " collection(s) available\n";
         }
 
+        output_->data(j, text.str());
         return 0;
     }
 
@@ -273,7 +267,7 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand_args.size() < 2)
         {
-            std::cerr << "Usage: uniconv plugin install <name[@version]> | <path> | +<collection> | collection:<name>\n";
+            output_->error("Usage: uniconv plugin install <name[@version]> | <path> | +<collection> | collection:<name>");
             return 1;
         }
 
@@ -308,7 +302,7 @@ namespace uniconv::cli::commands
                 }
                 else
                 {
-                    std::cerr << "Error: Expected a directory or plugin.json file\n";
+                    output_->error("Expected a directory or plugin.json file");
                     return 1;
                 }
             }
@@ -317,8 +311,8 @@ namespace uniconv::cli::commands
             auto manifest = discovery_.load_manifest(source_path);
             if (!manifest)
             {
-                std::cerr << "Error: Could not load plugin manifest from: " << source_path << "\n";
-                std::cerr << "Make sure the directory contains a valid plugin.json file\n";
+                output_->error("Could not load plugin manifest from: " + source_path.string());
+                output_->info("Make sure the directory contains a valid plugin.json file");
                 return 1;
             }
 
@@ -331,8 +325,8 @@ namespace uniconv::cli::commands
             {
                 if (!args.core_options.force)
                 {
-                    std::cerr << "Error: Plugin already installed at: " << dest_path << "\n";
-                    std::cerr << "Use --force to overwrite\n";
+                    output_->error("Plugin already installed at: " + dest_path.string());
+                    output_->info("Use --force to overwrite");
                     return 1;
                 }
                 std::filesystem::remove_all(dest_path);
@@ -341,7 +335,7 @@ namespace uniconv::cli::commands
             // Copy plugin
             if (!copy_plugin(source_path, dest_path))
             {
-                std::cerr << "Error: Failed to copy plugin to: " << dest_path << "\n";
+                output_->error("Failed to copy plugin to: " + dest_path.string());
                 return 1;
             }
 
@@ -364,7 +358,7 @@ namespace uniconv::cli::commands
                         {
                             deps_error += " (hint: " + check_result.install_hint + ")";
                         }
-                        std::cerr << "Error: " << deps_error << "\n";
+                        output_->error(deps_error);
                     }
                 }
 
@@ -383,13 +377,13 @@ namespace uniconv::cli::commands
 
                     if (has_auto_deps)
                     {
-                        if (!args.core_options.quiet)
-                        {
-                            std::cout << "Installing dependencies...\n";
-                        }
+                        output_->info("Installing dependencies...");
 
-                        auto progress = args.core_options.quiet ? nullptr :
-                            [](const std::string& msg) { std::cout << "  " << msg << "\n"; };
+                        std::function<void(const std::string&)> progress;
+                        if (!output_->is_quiet())
+                        {
+                            progress = [this](const std::string& msg) { output_->info("  " + msg); };
+                        }
 
                         auto install_result = dep_installer_.install_all(*manifest, progress);
 
@@ -397,12 +391,11 @@ namespace uniconv::cli::commands
                         {
                             deps_failed = true;
                             deps_error = install_result.message;
-                            std::cerr << "Error: Dependency installation failed: "
-                                      << install_result.message << "\n";
+                            output_->error("Dependency installation failed: " + install_result.message);
                         }
-                        else if (!args.core_options.quiet && !install_result.installed.empty())
+                        else if (!install_result.installed.empty())
                         {
-                            std::cout << "  " << install_result.message << "\n";
+                            output_->info("  " + install_result.message);
                         }
                     }
                 }
@@ -411,7 +404,7 @@ namespace uniconv::cli::commands
             // If dependency installation failed, rollback
             if (deps_failed)
             {
-                std::cerr << "Rolling back plugin installation...\n";
+                output_->info("Rolling back plugin installation...");
 
                 // Remove copied plugin directory
                 try
@@ -420,41 +413,33 @@ namespace uniconv::cli::commands
                 }
                 catch (const std::exception& e)
                 {
-                    std::cerr << "Warning: Failed to remove plugin directory: " << e.what() << "\n";
+                    output_->warning("Failed to remove plugin directory: " + std::string(e.what()));
                 }
 
                 // Remove dependency environment
                 dep_installer_.remove_env(manifest->name);
 
-                if (args.core_options.json_output)
-                {
-                    nlohmann::json j;
-                    j["success"] = false;
-                    j["plugin"] = manifest->name;
-                    j["error"] = deps_error;
-                    std::cout << j.dump(2) << std::endl;
-                }
+                nlohmann::json j;
+                j["success"] = false;
+                j["plugin"] = manifest->name;
+                j["error"] = deps_error;
+                output_->data(j, "Installation failed: " + deps_error);
 
                 return 1;
             }
 
-            if (!args.core_options.quiet)
-            {
-                std::cout << "Installed plugin: " << manifest->name << " (" << manifest->version << ")\n";
-                std::cout << "Location: " << dest_path << "\n";
-            }
+            nlohmann::json j;
+            j["success"] = true;
+            j["plugin"] = manifest->name;
+            j["version"] = manifest->version;
+            j["path"] = dest_path.string();
+            j["source"] = "local";
 
-            if (args.core_options.json_output)
-            {
-                nlohmann::json j;
-                j["success"] = true;
-                j["plugin"] = manifest->name;
-                j["version"] = manifest->version;
-                j["path"] = dest_path.string();
-                j["source"] = "local";
-                std::cout << j.dump(2) << std::endl;
-            }
+            std::ostringstream text;
+            text << "Installed plugin: " << manifest->name << " (" << manifest->version << ")\n";
+            text << "Location: " << dest_path;
 
+            output_->data(j, text.str());
             return 0;
         }
 
@@ -469,20 +454,18 @@ namespace uniconv::cli::commands
     {
         auto client = make_registry_client();
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "Searching registry for " << name;
-            if (version)
-                std::cout << "@" << *version;
-            std::cout << "...\n";
-        }
+        std::string search_msg = "Searching registry for " + name;
+        if (version)
+            search_msg += "@" + *version;
+        search_msg += "...";
+        output_->info(search_msg);
 
         // Fetch plugin entry
         auto entry = client->fetch_plugin(name);
         if (!entry)
         {
-            std::cerr << "Error: Plugin not found in registry: " << name << "\n";
-            std::cerr << "Use 'uniconv plugin search' to find available plugins\n";
+            output_->error("Plugin not found in registry: " + name);
+            output_->info("Use 'uniconv plugin search' to find available plugins");
             return 1;
         }
 
@@ -490,10 +473,10 @@ namespace uniconv::cli::commands
         auto release = client->resolve_release(*entry, version);
         if (!release)
         {
-            std::cerr << "Error: No compatible release found for " << name;
+            std::string err = "No compatible release found for " + name;
             if (version)
-                std::cerr << "@" << *version;
-            std::cerr << "\n";
+                err += "@" + *version;
+            output_->error(err);
             return 1;
         }
 
@@ -501,7 +484,7 @@ namespace uniconv::cli::commands
         auto artifact = client->resolve_artifact(*release);
         if (!artifact)
         {
-            std::cerr << "Error: No artifact available for current platform\n";
+            output_->error("No artifact available for current platform");
             return 1;
         }
 
@@ -514,23 +497,20 @@ namespace uniconv::cli::commands
             auto existing = installed_.get(name);
             if (existing && existing->version == release->version)
             {
-                std::cerr << "Plugin " << name << "@" << release->version << " is already installed\n";
-                std::cerr << "Use --force to reinstall\n";
+                output_->error("Plugin " + name + "@" + release->version + " is already installed");
+                output_->info("Use --force to reinstall");
                 return 1;
             }
         }
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "Downloading " << name << "@" << release->version << "...\n";
-        }
+        output_->info("Downloading " + name + "@" + release->version + "...");
 
         // Download and extract
         auto result = client->download_and_extract(*artifact, dest_dir);
         if (!result)
         {
-            std::cerr << "Error: Failed to download or extract plugin\n";
-            std::cerr << "This may be caused by a network error or invalid artifact\n";
+            output_->error("Failed to download or extract plugin");
+            output_->info("This may be caused by a network error or invalid artifact");
             return 1;
         }
 
@@ -556,7 +536,7 @@ namespace uniconv::cli::commands
                     {
                         deps_error += " (hint: " + check_result.install_hint + ")";
                     }
-                    std::cerr << "Error: " << deps_error << "\n";
+                    output_->error(deps_error);
                 }
             }
 
@@ -575,13 +555,13 @@ namespace uniconv::cli::commands
 
                 if (has_auto_deps)
                 {
-                    if (!args.core_options.quiet)
-                    {
-                        std::cout << "Installing dependencies...\n";
-                    }
+                    output_->info("Installing dependencies...");
 
-                    auto progress = args.core_options.quiet ? nullptr :
-                        [](const std::string& msg) { std::cout << "  " << msg << "\n"; };
+                    std::function<void(const std::string&)> progress;
+                    if (!output_->is_quiet())
+                    {
+                        progress = [this](const std::string& msg) { output_->info("  " + msg); };
+                    }
 
                     auto install_result = dep_installer_.install_all(*manifest, progress);
 
@@ -589,12 +569,11 @@ namespace uniconv::cli::commands
                     {
                         deps_failed = true;
                         deps_error = install_result.message;
-                        std::cerr << "Error: Dependency installation failed: "
-                                  << install_result.message << "\n";
+                        output_->error("Dependency installation failed: " + install_result.message);
                     }
-                    else if (!args.core_options.quiet && !install_result.installed.empty())
+                    else if (!install_result.installed.empty())
                     {
-                        std::cout << "  " << install_result.message << "\n";
+                        output_->info("  " + install_result.message);
                     }
                 }
             }
@@ -603,7 +582,7 @@ namespace uniconv::cli::commands
         // If dependency installation failed, rollback
         if (deps_failed)
         {
-            std::cerr << "Rolling back plugin installation...\n";
+            output_->info("Rolling back plugin installation...");
 
             // Remove extracted plugin directory
             try
@@ -612,20 +591,17 @@ namespace uniconv::cli::commands
             }
             catch (const std::exception& e)
             {
-                std::cerr << "Warning: Failed to remove plugin directory: " << e.what() << "\n";
+                output_->warning("Failed to remove plugin directory: " + std::string(e.what()));
             }
 
             // Remove dependency environment
             dep_installer_.remove_env(name);
 
-            if (args.core_options.json_output)
-            {
-                nlohmann::json j;
-                j["success"] = false;
-                j["plugin"] = name;
-                j["error"] = deps_error;
-                std::cout << j.dump(2) << std::endl;
-            }
+            nlohmann::json j;
+            j["success"] = false;
+            j["plugin"] = name;
+            j["error"] = deps_error;
+            output_->data(j, "Installation failed: " + deps_error);
 
             return 1;
         }
@@ -634,23 +610,14 @@ namespace uniconv::cli::commands
         installed_.record_install(name, release->version);
         installed_.save();
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "Installed " << name << "@" << release->version
-                      << " to " << dest_dir << "\n";
-        }
+        nlohmann::json j;
+        j["success"] = true;
+        j["plugin"] = name;
+        j["version"] = release->version;
+        j["path"] = dest_dir.string();
+        j["source"] = "registry";
 
-        if (args.core_options.json_output)
-        {
-            nlohmann::json j;
-            j["success"] = true;
-            j["plugin"] = name;
-            j["version"] = release->version;
-            j["path"] = dest_dir.string();
-            j["source"] = "registry";
-            std::cout << j.dump(2) << std::endl;
-        }
-
+        output_->data(j, "Installed " + name + "@" + release->version + " to " + dest_dir.string());
         return 0;
     }
 
@@ -659,34 +626,24 @@ namespace uniconv::cli::commands
     {
         auto client = make_registry_client();
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "Fetching collection '" << collection_name << "'...\n";
-        }
+        output_->info("Fetching collection '" + collection_name + "'...");
 
         auto collection = client->find_collection(collection_name);
         if (!collection)
         {
-            std::cerr << "Error: Collection not found: " << collection_name << "\n";
+            output_->error("Collection not found: " + collection_name);
             return 1;
         }
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "Collection '" << collection_name << "': "
-                      << collection->description << "\n";
-            std::cout << "Installing " << collection->plugins.size() << " plugin(s)...\n\n";
-        }
+        output_->info("Collection '" + collection_name + "': " + collection->description);
+        output_->info("Installing " + std::to_string(collection->plugins.size()) + " plugin(s)...\n");
 
         int installed = 0;
         int failed = 0;
 
         for (const auto &plugin_name : collection->plugins)
         {
-            if (!args.core_options.quiet)
-            {
-                std::cout << "--- " << plugin_name << " ---\n";
-            }
+            output_->info("--- " + plugin_name + " ---");
 
             int result = install_from_registry(plugin_name, std::nullopt, args);
             if (result == 0)
@@ -698,37 +655,25 @@ namespace uniconv::cli::commands
                 ++failed;
             }
 
-            if (!args.core_options.quiet)
-            {
-                std::cout << "\n";
-            }
+            output_->info("");
         }
 
-        if (!args.core_options.quiet)
+        std::string summary = std::to_string(installed) + " plugin(s) installed";
+        if (failed > 0)
+            summary += ", " + std::to_string(failed) + " failed";
+
+        nlohmann::json j;
+        j["success"] = (failed == 0);
+        j["collection"] = collection_name;
+        j["installed"] = installed;
+        j["failed"] = failed;
+        j["plugins"] = nlohmann::json::array();
+        for (const auto &p : collection->plugins)
         {
-            std::cout << installed << " plugin(s) installed";
-            if (failed > 0)
-                std::cout << ", " << failed << " failed";
-            std::cout << "\n";
+            j["plugins"].push_back(p);
         }
 
-        if (args.core_options.json_output)
-        {
-            nlohmann::json j;
-            j["success"] = (failed == 0);
-            j["collection"] = collection_name;
-            j["installed"] = installed;
-            j["failed"] = failed;
-
-            j["plugins"] = nlohmann::json::array();
-            for (const auto &p : collection->plugins)
-            {
-                j["plugins"].push_back(p);
-            }
-
-            std::cout << j.dump(2) << std::endl;
-        }
-
+        output_->data(j, summary);
         return failed > 0 ? 1 : 0;
     }
 
@@ -736,7 +681,7 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Usage: uniconv plugin remove <name>\n";
+            output_->error("Usage: uniconv plugin remove <name>");
             return 1;
         }
 
@@ -746,7 +691,7 @@ namespace uniconv::cli::commands
         auto plugin_dir = find_plugin_dir(name);
         if (!plugin_dir)
         {
-            std::cerr << "Error: Plugin not found: " << name << "\n";
+            output_->error("Plugin not found: " + name);
             return 1;
         }
 
@@ -754,8 +699,8 @@ namespace uniconv::cli::commands
         auto user_plugins = core::PluginDiscovery::get_user_plugin_dir();
         if (!plugin_dir->string().starts_with(user_plugins.string()))
         {
-            std::cerr << "Error: Cannot remove non-user plugins\n";
-            std::cerr << "Plugin location: " << *plugin_dir << "\n";
+            output_->error("Cannot remove non-user plugins");
+            output_->info("Plugin location: " + plugin_dir->string());
             return 1;
         }
 
@@ -766,7 +711,7 @@ namespace uniconv::cli::commands
         }
         catch (const std::exception &e)
         {
-            std::cerr << "Error: Failed to remove plugin: " << e.what() << "\n";
+            output_->error("Failed to remove plugin: " + std::string(e.what()));
             return 1;
         }
 
@@ -777,24 +722,13 @@ namespace uniconv::cli::commands
         // Remove dependency environment
         if (dep_installer_.remove_env(name))
         {
-            if (!args.core_options.quiet)
-            {
-                std::cout << "Removed dependency environment for: " << name << "\n";
-            }
+            output_->info("Removed dependency environment for: " + name);
         }
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "Removed plugin: " << name << "\n";
-        }
-
-        if (args.core_options.json_output)
-        {
-            nlohmann::json j;
-            j["success"] = true;
-            j["plugin"] = name;
-            std::cout << j.dump(2) << std::endl;
-        }
+        nlohmann::json j;
+        j["success"] = true;
+        j["plugin"] = name;
+        output_->data(j, "Removed plugin: " + name);
 
         return 0;
     }
@@ -803,7 +737,7 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Usage: uniconv plugin info <name>\n";
+            output_->error("Usage: uniconv plugin info <name>");
             return 1;
         }
 
@@ -815,36 +749,32 @@ namespace uniconv::cli::commands
         {
             if (p.id == name || p.scope == name)
             {
-                if (args.core_options.json_output)
+                auto j = p.to_json();
+                j["source"] = "built-in";
+
+                std::ostringstream text;
+                text << "Name:        " << p.id << "\n";
+                text << "Scope:       " << p.scope << "\n";
+                text << "Version:     " << p.version << "\n";
+                text << "Description: " << p.description << "\n";
+                text << "Source:      built-in\n";
+                text << "Targets:     ";
+                for (size_t i = 0; i < p.targets.size(); ++i)
                 {
-                    auto j = p.to_json();
-                    j["source"] = "built-in";
-                    std::cout << j.dump(2) << std::endl;
+                    if (i > 0)
+                        text << ", ";
+                    text << p.targets[i];
                 }
-                else
+                text << "\n";
+                text << "Inputs:      ";
+                for (size_t i = 0; i < p.input_formats.size(); ++i)
                 {
-                    std::cout << "Name:        " << p.id << "\n";
-                    std::cout << "Scope:       " << p.scope << "\n";
-                    std::cout << "Version:     " << p.version << "\n";
-                    std::cout << "Description: " << p.description << "\n";
-                    std::cout << "Source:      built-in\n";
-                    std::cout << "Targets:     ";
-                    for (size_t i = 0; i < p.targets.size(); ++i)
-                    {
-                        if (i > 0)
-                            std::cout << ", ";
-                        std::cout << p.targets[i];
-                    }
-                    std::cout << "\n";
-                    std::cout << "Inputs:      ";
-                    for (size_t i = 0; i < p.input_formats.size(); ++i)
-                    {
-                        if (i > 0)
-                            std::cout << ", ";
-                        std::cout << p.input_formats[i];
-                    }
-                    std::cout << "\n";
+                    if (i > 0)
+                        text << ", ";
+                    text << p.input_formats[i];
                 }
+
+                output_->data(j, text.str());
                 return 0;
             }
         }
@@ -853,94 +783,87 @@ namespace uniconv::cli::commands
         auto plugin_dir = find_plugin_dir(name);
         if (!plugin_dir)
         {
-            std::cerr << "Error: Plugin not found: " << name << "\n";
+            output_->error("Plugin not found: " + name);
             return 1;
         }
 
         auto manifest = discovery_.load_manifest(*plugin_dir);
         if (!manifest)
         {
-            std::cerr << "Error: Could not load manifest for: " << name << "\n";
+            output_->error("Could not load manifest for: " + name);
             return 1;
         }
 
         std::string source = installed_.is_registry_installed(manifest->name) ? "registry" : "local";
 
-        if (args.core_options.json_output)
+        auto j = manifest->to_json();
+        j["path"] = plugin_dir->string();
+        j["source"] = source;
+
+        std::ostringstream text;
+        text << "Name:        " << manifest->name << "\n";
+        text << "Scope:       " << manifest->scope << "\n";
+        text << "Version:     " << manifest->version << "\n";
+        text << "Description: " << manifest->description << "\n";
+        text << "Type:        " << core::plugin_interface_to_string(manifest->iface) << "\n";
+        text << "Source:      " << source << "\n";
+        text << "Path:        " << *plugin_dir << "\n";
+
+        if (manifest->iface == core::PluginInterface::CLI)
         {
-            auto j = manifest->to_json();
-            j["path"] = plugin_dir->string();
-            j["source"] = source;
-            std::cout << j.dump(2) << std::endl;
+            text << "Executable:  " << manifest->executable << "\n";
         }
         else
         {
-            std::cout << "Name:        " << manifest->name << "\n";
-            std::cout << "Scope:       " << manifest->scope << "\n";
-            std::cout << "Version:     " << manifest->version << "\n";
-            std::cout << "Description: " << manifest->description << "\n";
-            std::cout << "Type:        " << core::plugin_interface_to_string(manifest->iface) << "\n";
-            std::cout << "Source:      " << source << "\n";
-            std::cout << "Path:        " << *plugin_dir << "\n";
+            text << "Library:     " << manifest->library << "\n";
+        }
 
-            if (manifest->iface == core::PluginInterface::CLI)
-            {
-                std::cout << "Executable:  " << manifest->executable << "\n";
-            }
-            else
-            {
-                std::cout << "Library:     " << manifest->library << "\n";
-            }
+        text << "Targets:     ";
+        for (size_t i = 0; i < manifest->targets.size(); ++i)
+        {
+            if (i > 0)
+                text << ", ";
+            text << manifest->targets[i];
+        }
+        text << "\n";
 
-            std::cout << "Targets:     ";
-            for (size_t i = 0; i < manifest->targets.size(); ++i)
-            {
-                if (i > 0)
-                    std::cout << ", ";
-                std::cout << manifest->targets[i];
-            }
-            std::cout << "\n";
+        text << "Inputs:      ";
+        for (size_t i = 0; i < manifest->input_formats.size(); ++i)
+        {
+            if (i > 0)
+                text << ", ";
+            text << manifest->input_formats[i];
+        }
 
-            std::cout << "Inputs:      ";
-            for (size_t i = 0; i < manifest->input_formats.size(); ++i)
+        if (!manifest->options.empty())
+        {
+            text << "\n\nOptions:";
+            for (const auto &opt : manifest->options)
             {
-                if (i > 0)
-                    std::cout << ", ";
-                std::cout << manifest->input_formats[i];
-            }
-            std::cout << "\n";
-
-            if (!manifest->options.empty())
-            {
-                std::cout << "\nOptions:\n";
-                for (const auto &opt : manifest->options)
+                text << "\n  " << opt.name;
+                if (!opt.type.empty())
+                    text << " (" << opt.type << ")";
+                if (!opt.default_value.empty())
+                    text << " [default: " << opt.default_value << "]";
+                if (!opt.description.empty())
                 {
-                    std::cout << "  " << opt.name;
-                    if (!opt.type.empty())
-                        std::cout << " (" << opt.type << ")";
-                    if (!opt.default_value.empty())
-                        std::cout << " [default: " << opt.default_value << "]";
-                    std::cout << "\n";
-                    if (!opt.description.empty())
-                    {
-                        std::cout << "      " << opt.description << "\n";
-                    }
-                }
-            }
-
-            if (!manifest->dependencies.empty())
-            {
-                std::cout << "\nDependencies:\n";
-                for (const auto &dep : manifest->dependencies)
-                {
-                    std::cout << "  [" << dep.type << "] " << dep.name;
-                    if (dep.version)
-                        std::cout << " " << *dep.version;
-                    std::cout << "\n";
+                    text << "\n      " << opt.description;
                 }
             }
         }
 
+        if (!manifest->dependencies.empty())
+        {
+            text << "\n\nDependencies:";
+            for (const auto &dep : manifest->dependencies)
+            {
+                text << "\n  [" << dep.type << "] " << dep.name;
+                if (dep.version)
+                    text << " " << *dep.version;
+            }
+        }
+
+        output_->data(j, text.str());
         return 0;
     }
 
@@ -948,7 +871,7 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Usage: uniconv plugin search <query>\n";
+            output_->error("Usage: uniconv plugin search <query>");
             return 1;
         }
 
@@ -957,35 +880,24 @@ namespace uniconv::cli::commands
 
         if (results.empty())
         {
-            if (!args.core_options.quiet)
-            {
-                std::cout << "No plugins found matching: " << args.subcommand << "\n";
-            }
-
-            if (args.core_options.json_output)
-            {
-                std::cout << nlohmann::json::array().dump(2) << std::endl;
-            }
+            output_->info("No plugins found matching: " + args.subcommand);
+            output_->data(nlohmann::json::array(), "No plugins found matching: " + args.subcommand);
             return 0;
         }
 
-        if (args.core_options.json_output)
+        nlohmann::json j = nlohmann::json::array();
+        for (const auto &entry : results)
         {
-            nlohmann::json j = nlohmann::json::array();
-            for (const auto &entry : results)
-            {
-                j.push_back(entry.to_json());
-            }
-            std::cout << j.dump(2) << std::endl;
-            return 0;
+            j.push_back(entry.to_json());
         }
 
-        std::cout << std::left
-                  << std::setw(25) << "NAME"
-                  << std::setw(10) << "VERSION"
-                  << std::setw(15) << "AUTHOR"
-                  << "DESCRIPTION\n";
-        std::cout << std::string(80, '-') << "\n";
+        std::ostringstream text;
+        text << std::left
+             << std::setw(25) << "NAME"
+             << std::setw(10) << "VERSION"
+             << std::setw(15) << "AUTHOR"
+             << "DESCRIPTION\n";
+        text << std::string(80, '-') << "\n";
 
         for (const auto &entry : results)
         {
@@ -994,16 +906,17 @@ namespace uniconv::cli::commands
             if (desc.size() > 40)
                 desc = desc.substr(0, 37) + "...";
 
-            std::cout << std::left
-                      << std::setw(25) << entry.name
-                      << std::setw(10) << entry.latest
-                      << std::setw(15) << entry.author
-                      << desc << "\n";
+            text << std::left
+                 << std::setw(25) << entry.name
+                 << std::setw(10) << entry.latest
+                 << std::setw(15) << entry.author
+                 << desc << "\n";
         }
 
-        std::cout << "\n"
-                  << results.size() << " plugin(s) found\n";
+        text << "\n"
+             << results.size() << " plugin(s) found";
 
+        output_->data(j, text.str());
         return 0;
     }
 
@@ -1019,7 +932,7 @@ namespace uniconv::cli::commands
         {
             if (!installed_.is_registry_installed(args.subcommand))
             {
-                std::cerr << "Error: " << args.subcommand << " was not installed from registry\n";
+                output_->error(args.subcommand + " was not installed from registry");
                 return 1;
             }
             to_update.push_back(args.subcommand);
@@ -1036,10 +949,7 @@ namespace uniconv::cli::commands
 
         if (to_update.empty())
         {
-            if (!args.core_options.quiet)
-            {
-                std::cout << "No registry-installed plugins to update\n";
-            }
+            output_->info("No registry-installed plugins to update");
             return 0;
         }
 
@@ -1055,10 +965,7 @@ namespace uniconv::cli::commands
             auto entry = client->fetch_plugin(name);
             if (!entry)
             {
-                if (!args.core_options.quiet)
-                {
-                    std::cerr << "Warning: Could not fetch registry info for " << name << "\n";
-                }
+                output_->warning("Could not fetch registry info for " + name);
                 ++failed;
                 continue;
             }
@@ -1066,10 +973,7 @@ namespace uniconv::cli::commands
             auto release = client->resolve_release(*entry);
             if (!release)
             {
-                if (!args.core_options.quiet)
-                {
-                    std::cerr << "Warning: No compatible release found for " << name << "\n";
-                }
+                output_->warning("No compatible release found for " + name);
                 ++failed;
                 continue;
             }
@@ -1078,18 +982,11 @@ namespace uniconv::cli::commands
             int cmp = utils::compare_versions(release->version, record->version);
             if (cmp <= 0)
             {
-                if (!args.core_options.quiet)
-                {
-                    std::cout << name << " is up to date (" << record->version << ")\n";
-                }
+                output_->info(name + " is up to date (" + record->version + ")");
                 continue;
             }
 
-            if (!args.core_options.quiet)
-            {
-                std::cout << "Updating " << name << " " << record->version
-                          << " -> " << release->version << "...\n";
-            }
+            output_->info("Updating " + name + " " + record->version + " -> " + release->version + "...");
 
             // Create a modified args with force=true for the reinstall
             ParsedArgs install_args = args;
@@ -1106,14 +1003,10 @@ namespace uniconv::cli::commands
             }
         }
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "\n"
-                      << updated << " plugin(s) updated";
-            if (failed > 0)
-                std::cout << ", " << failed << " failed";
-            std::cout << "\n";
-        }
+        std::string summary = "\n" + std::to_string(updated) + " plugin(s) updated";
+        if (failed > 0)
+            summary += ", " + std::to_string(failed) + " failed";
+        output_->info(summary);
 
         return failed > 0 ? 1 : 0;
     }
@@ -1173,8 +1066,8 @@ namespace uniconv::cli::commands
         // deps subcommand has sub-actions
         if (args.subcommand_args.size() < 2)
         {
-            std::cerr << "Usage: uniconv plugin deps <action> [plugin-name]\n";
-            std::cerr << "Actions: install, check, clean, info\n";
+            output_->error("Usage: uniconv plugin deps <action> [plugin-name]");
+            output_->info("Actions: install, check, clean, info");
             return 1;
         }
 
@@ -1197,8 +1090,8 @@ namespace uniconv::cli::commands
             return deps_info(args);
         }
 
-        std::cerr << "Unknown deps action: " << action << "\n";
-        std::cerr << "Available actions: install, check, clean, info\n";
+        output_->error("Unknown deps action: " + action);
+        output_->info("Available actions: install, check, clean, info");
         return 1;
     }
 
@@ -1206,7 +1099,7 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Usage: uniconv plugin deps install <plugin-name>\n";
+            output_->error("Usage: uniconv plugin deps install <plugin-name>");
             return 1;
         }
 
@@ -1216,44 +1109,34 @@ namespace uniconv::cli::commands
         auto plugin_dir = find_plugin_dir(name);
         if (!plugin_dir)
         {
-            std::cerr << "Error: Plugin not found: " << name << "\n";
+            output_->error("Plugin not found: " + name);
             return 1;
         }
 
         auto manifest = discovery_.load_manifest(*plugin_dir);
         if (!manifest)
         {
-            std::cerr << "Error: Could not load manifest for: " << name << "\n";
+            output_->error("Could not load manifest for: " + name);
             return 1;
         }
 
         if (manifest->dependencies.empty())
         {
-            if (!args.core_options.quiet)
-            {
-                std::cout << "Plugin has no dependencies\n";
-            }
+            output_->info("Plugin has no dependencies");
             return 0;
         }
 
-        if (!args.core_options.quiet)
-        {
-            std::cout << "Installing dependencies for " << name << "...\n";
-        }
+        output_->info("Installing dependencies for " + name + "...");
 
-        auto progress = args.core_options.quiet ? nullptr :
-            [](const std::string& msg) { std::cout << "  " << msg << "\n"; };
+        std::function<void(const std::string&)> progress;
+        if (!output_->is_quiet())
+        {
+            progress = [this](const std::string& msg) { output_->info("  " + msg); };
+        }
 
         auto result = dep_installer_.install_all(*manifest, progress);
 
-        if (args.core_options.json_output)
-        {
-            std::cout << result.to_json().dump(2) << std::endl;
-        }
-        else if (!args.core_options.quiet)
-        {
-            std::cout << result.message << "\n";
-        }
+        output_->data(result.to_json(), result.message);
 
         return result.success ? 0 : 1;
     }
@@ -1279,14 +1162,12 @@ namespace uniconv::cli::commands
 
         if (plugins_to_check.empty())
         {
-            if (!args.core_options.quiet)
-            {
-                std::cout << "No plugins installed\n";
-            }
+            output_->info("No plugins installed");
             return 0;
         }
 
         nlohmann::json json_results = nlohmann::json::array();
+        std::ostringstream text;
         int unsatisfied = 0;
 
         for (const auto& name : plugins_to_check)
@@ -1299,49 +1180,40 @@ namespace uniconv::cli::commands
 
             auto check = dep_installer_.check_deps(*manifest);
 
-            if (args.core_options.json_output)
+            nlohmann::json j;
+            j["plugin"] = name;
+            j["satisfied"] = check.satisfied;
+            j["missing"] = check.missing;
+            j["present"] = check.present;
+            json_results.push_back(j);
+
+            text << name << ": ";
+            if (check.satisfied)
             {
-                nlohmann::json j;
-                j["plugin"] = name;
-                j["satisfied"] = check.satisfied;
-                j["missing"] = check.missing;
-                j["present"] = check.present;
-                json_results.push_back(j);
+                text << "OK";
+                if (!check.present.empty())
+                {
+                    text << " (" << check.present.size() << " deps)";
+                }
             }
             else
             {
-                std::cout << name << ": ";
-                if (check.satisfied)
+                text << "MISSING: ";
+                for (size_t i = 0; i < check.missing.size(); ++i)
                 {
-                    std::cout << "OK";
-                    if (!check.present.empty())
-                    {
-                        std::cout << " (" << check.present.size() << " deps)";
-                    }
+                    if (i > 0) text << ", ";
+                    text << check.missing[i];
                 }
-                else
-                {
-                    std::cout << "MISSING: ";
-                    for (size_t i = 0; i < check.missing.size(); ++i)
-                    {
-                        if (i > 0) std::cout << ", ";
-                        std::cout << check.missing[i];
-                    }
-                    ++unsatisfied;
-                }
-                std::cout << "\n";
+                ++unsatisfied;
             }
+            text << "\n";
         }
 
-        if (args.core_options.json_output)
-        {
-            std::cout << json_results.dump(2) << std::endl;
-        }
-
+        output_->data(json_results, text.str());
         return unsatisfied > 0 ? 1 : 0;
     }
 
-    int PluginCommand::deps_clean(const ParsedArgs &args)
+    int PluginCommand::deps_clean(const ParsedArgs & /*args*/)
     {
         // Get list of installed plugins
         auto manifests = discovery_.discover_all();
@@ -1353,29 +1225,25 @@ namespace uniconv::cli::commands
 
         auto removed = dep_installer_.clean_orphaned(installed_names);
 
-        if (args.core_options.json_output)
+        nlohmann::json j;
+        j["removed"] = removed;
+        j["count"] = removed.size();
+
+        std::ostringstream text;
+        if (removed.empty())
         {
-            nlohmann::json j;
-            j["removed"] = removed;
-            j["count"] = removed.size();
-            std::cout << j.dump(2) << std::endl;
+            text << "No orphaned dependency environments found";
         }
-        else if (!args.core_options.quiet)
+        else
         {
-            if (removed.empty())
+            text << "Removed " << removed.size() << " orphaned environment(s):";
+            for (const auto& name : removed)
             {
-                std::cout << "No orphaned dependency environments found\n";
-            }
-            else
-            {
-                std::cout << "Removed " << removed.size() << " orphaned environment(s):\n";
-                for (const auto& name : removed)
-                {
-                    std::cout << "  " << name << "\n";
-                }
+                text << "\n  " << name;
             }
         }
 
+        output_->data(j, text.str());
         return 0;
     }
 
@@ -1383,7 +1251,7 @@ namespace uniconv::cli::commands
     {
         if (args.subcommand.empty())
         {
-            std::cerr << "Usage: uniconv plugin deps info <plugin-name>\n";
+            output_->error("Usage: uniconv plugin deps info <plugin-name>");
             return 1;
         }
 
@@ -1392,55 +1260,50 @@ namespace uniconv::cli::commands
         auto env = dep_installer_.get_env(name);
         if (!env)
         {
-            std::cerr << "Error: No dependency environment found for: " << name << "\n";
+            output_->error("No dependency environment found for: " + name);
             return 1;
         }
 
-        if (args.core_options.json_output)
+        nlohmann::json j;
+        j["plugin"] = name;
+        j["env_dir"] = env->env_dir.string();
+        j["has_python"] = env->has_python_env();
+        j["has_node"] = env->has_node_env();
+        j["dependencies"] = nlohmann::json::array();
+        for (const auto& dep : env->dependencies)
         {
-            nlohmann::json j;
-            j["plugin"] = name;
-            j["env_dir"] = env->env_dir.string();
-            j["has_python"] = env->has_python_env();
-            j["has_node"] = env->has_node_env();
-            j["dependencies"] = nlohmann::json::array();
+            j["dependencies"].push_back(dep.to_json());
+        }
+
+        std::ostringstream text;
+        text << "Plugin:     " << name << "\n";
+        text << "Env Dir:    " << env->env_dir << "\n";
+        text << "Python:     " << (env->has_python_env() ? "Yes" : "No") << "\n";
+        if (env->has_python_env())
+        {
+            text << "  Venv:     " << env->python_dir() << "\n";
+            text << "  Python:   " << env->python_bin() << "\n";
+        }
+        text << "Node:       " << (env->has_node_env() ? "Yes" : "No");
+        if (env->has_node_env())
+        {
+            text << "\n  Modules:  " << env->node_dir() / "node_modules";
+        }
+
+        if (!env->dependencies.empty())
+        {
+            text << "\n\nInstalled dependencies:";
             for (const auto& dep : env->dependencies)
             {
-                j["dependencies"].push_back(dep.to_json());
-            }
-            std::cout << j.dump(2) << std::endl;
-        }
-        else
-        {
-            std::cout << "Plugin:     " << name << "\n";
-            std::cout << "Env Dir:    " << env->env_dir << "\n";
-            std::cout << "Python:     " << (env->has_python_env() ? "Yes" : "No") << "\n";
-            if (env->has_python_env())
-            {
-                std::cout << "  Venv:     " << env->python_dir() << "\n";
-                std::cout << "  Python:   " << env->python_bin() << "\n";
-            }
-            std::cout << "Node:       " << (env->has_node_env() ? "Yes" : "No") << "\n";
-            if (env->has_node_env())
-            {
-                std::cout << "  Modules:  " << env->node_dir() / "node_modules" << "\n";
-            }
-
-            if (!env->dependencies.empty())
-            {
-                std::cout << "\nInstalled dependencies:\n";
-                for (const auto& dep : env->dependencies)
+                text << "\n  [" << dep.type << "] " << dep.name;
+                if (!dep.version.empty())
                 {
-                    std::cout << "  [" << dep.type << "] " << dep.name;
-                    if (!dep.version.empty())
-                    {
-                        std::cout << " (" << dep.version << ")";
-                    }
-                    std::cout << "\n";
+                    text << " (" << dep.version << ")";
                 }
             }
         }
 
+        output_->data(j, text.str());
         return 0;
     }
 

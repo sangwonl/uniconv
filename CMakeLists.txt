@@ -56,6 +56,11 @@ add_executable(uniconv
     src/core/plugin_loader_cli.cpp
     src/core/config_manager.h
     src/core/config_manager.cpp
+    src/core/output/output.h
+    src/core/output/console_output.h
+    src/core/output/console_output.cpp
+    src/core/output/json_output.h
+    src/core/output/json_output.cpp
     src/core/plugin_loader_native.h
     src/core/plugin_loader_native.cpp
     src/core/pipeline_executor.cpp

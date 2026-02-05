@@ -2,6 +2,7 @@
 
 #include "cli/parser.h"
 #include "core/config_manager.h"
+#include "core/output/output.h"
 #include <memory>
 
 namespace uniconv::cli::commands {
@@ -9,7 +10,8 @@ namespace uniconv::cli::commands {
 // Config management command handler
 class ConfigCommand {
 public:
-    explicit ConfigCommand(std::shared_ptr<core::ConfigManager> config_manager);
+    ConfigCommand(std::shared_ptr<core::ConfigManager> config_manager,
+                  std::shared_ptr<core::output::IOutput> output);
 
     // Execute config subcommand
     int execute(const ParsedArgs& args);
@@ -28,6 +30,7 @@ public:
 
 private:
     std::shared_ptr<core::ConfigManager> config_manager_;
+    std::shared_ptr<core::output::IOutput> output_;
 };
 
 } // namespace uniconv::cli::commands

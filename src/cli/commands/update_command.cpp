@@ -4,7 +4,6 @@
 #include <uniconv/version.h>
 #include <filesystem>
 #include <fstream>
-#include <iostream>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -15,34 +14,39 @@
 namespace uniconv::cli::commands
 {
 
+    UpdateCommand::UpdateCommand(std::shared_ptr<core::output::IOutput> output)
+        : output_(std::move(output))
+    {
+    }
+
     int UpdateCommand::execute(const ParsedArgs &args)
     {
         std::string current_version = UNICONV_VERSION;
 
-        std::cout << "Current version: v" << current_version << "\n";
-        std::cout << "Checking for updates...\n";
+        output_->info("Current version: v" + current_version);
+        output_->info("Checking for updates...");
 
         auto latest_version = fetch_latest_version();
         if (latest_version.empty())
         {
-            std::cerr << "Error: Failed to check for latest version\n";
+            output_->error("Failed to check for latest version");
             return 1;
         }
 
-        std::cout << "Latest version:  v" << latest_version << "\n";
+        output_->info("Latest version:  v" + latest_version);
 
         int cmp = utils::compare_versions(latest_version, current_version);
         if (cmp <= 0)
         {
-            std::cout << "Already up to date.\n";
+            output_->success("Already up to date.");
             return 0;
         }
 
         if (args.update_check_only)
         {
-            std::cout << "Update available: v" << current_version
-                      << " -> v" << latest_version << "\n";
-            std::cout << "Run 'uniconv update' to install.\n";
+            output_->info("Update available: v" + current_version +
+                          " -> v" + latest_version);
+            output_->info("Run 'uniconv update' to install.");
             return 0;
         }
 
@@ -126,19 +130,19 @@ namespace uniconv::cli::commands
         auto archive_path = tmp_dir / asset_name;
         auto checksums_path = tmp_dir / "checksums.txt";
 
-        std::cout << "Downloading " << asset_name << "...\n";
+        output_->info("Downloading " + asset_name + "...");
 
         // Download asset and checksums
         if (!utils::download_file(asset_url, archive_path))
         {
-            std::cerr << "Error: Failed to download " << asset_url << "\n";
+            output_->error("Failed to download " + asset_url);
             std::filesystem::remove_all(tmp_dir);
             return 1;
         }
 
         if (!utils::download_file(checksums_url, checksums_path))
         {
-            std::cerr << "Warning: Could not download checksums, skipping verification\n";
+            output_->warning("Could not download checksums, skipping verification");
         }
         else
         {
@@ -146,7 +150,7 @@ namespace uniconv::cli::commands
             auto computed = utils::sha256_file(archive_path);
             if (!computed)
             {
-                std::cerr << "Error: Failed to compute checksum\n";
+                output_->error("Failed to compute checksum");
                 std::filesystem::remove_all(tmp_dir);
                 return 1;
             }
@@ -170,9 +174,9 @@ namespace uniconv::cli::commands
                         }
                         else
                         {
-                            std::cerr << "Error: Checksum mismatch!\n"
-                                      << "  Expected: " << expected << "\n"
-                                      << "  Got:      " << *computed << "\n";
+                            output_->error("Checksum mismatch!");
+                            output_->info("  Expected: " + expected);
+                            output_->info("  Got:      " + *computed);
                             std::filesystem::remove_all(tmp_dir);
                             return 1;
                         }
@@ -183,11 +187,11 @@ namespace uniconv::cli::commands
 
             if (verified)
             {
-                std::cout << "Checksum verified.\n";
+                output_->info("Checksum verified.");
             }
             else
             {
-                std::cerr << "Warning: Asset not found in checksums.txt, skipping verification\n";
+                output_->warning("Asset not found in checksums.txt, skipping verification");
             }
         }
 
@@ -195,10 +199,10 @@ namespace uniconv::cli::commands
         auto extract_dir = tmp_dir / "extracted";
         std::filesystem::create_directories(extract_dir);
 
-        std::cout << "Extracting...\n";
+        output_->info("Extracting...");
         if (!extract_archive(archive_path, extract_dir))
         {
-            std::cerr << "Error: Failed to extract archive\n";
+            output_->error("Failed to extract archive");
             std::filesystem::remove_all(tmp_dir);
             return 1;
         }
@@ -211,7 +215,7 @@ namespace uniconv::cli::commands
 
         if (!std::filesystem::exists(new_binary))
         {
-            std::cerr << "Error: Binary not found in archive\n";
+            output_->error("Binary not found in archive");
             std::filesystem::remove_all(tmp_dir);
             return 1;
         }
@@ -220,13 +224,13 @@ namespace uniconv::cli::commands
         auto self_path = get_self_path();
         if (self_path.empty())
         {
-            std::cerr << "Error: Could not determine current executable path\n";
+            output_->error("Could not determine current executable path");
             std::filesystem::remove_all(tmp_dir);
             return 1;
         }
 
         // Replace the current binary
-        std::cout << "Installing to " << self_path.string() << "...\n";
+        output_->info("Installing to " + self_path.string() + "...");
 
         auto backup_path = self_path;
         backup_path += ".bak";
@@ -237,8 +241,8 @@ namespace uniconv::cli::commands
         std::filesystem::rename(self_path, backup_path, ec);
         if (ec)
         {
-            std::cerr << "Error: Could not back up current binary: " << ec.message() << "\n";
-            std::cerr << "You may need to run with elevated permissions.\n";
+            output_->error("Could not back up current binary: " + ec.message());
+            output_->info("You may need to run with elevated permissions.");
             std::filesystem::remove_all(tmp_dir);
             return 1;
         }
@@ -248,7 +252,7 @@ namespace uniconv::cli::commands
                                    std::filesystem::copy_options::overwrite_existing, ec);
         if (ec)
         {
-            std::cerr << "Error: Could not install new binary: " << ec.message() << "\n";
+            output_->error("Could not install new binary: " + ec.message());
             // Restore backup
             std::filesystem::rename(backup_path, self_path);
             std::filesystem::remove_all(tmp_dir);
@@ -268,8 +272,8 @@ namespace uniconv::cli::commands
         std::filesystem::remove(backup_path, ec);
         std::filesystem::remove_all(tmp_dir, ec);
 
-        std::cout << "Updated successfully: v" << UNICONV_VERSION
-                  << " -> v" << latest_version << "\n";
+        output_->success("Updated successfully: v" + std::string(UNICONV_VERSION) +
+                         " -> v" + latest_version);
         return 0;
     }
 
