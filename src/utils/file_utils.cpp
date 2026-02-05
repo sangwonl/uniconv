@@ -82,12 +82,47 @@ const std::unordered_map<std::string, core::FileCategory> kCategories = {
 
 } // anonymous namespace
 
+// Extract format from temp file naming pattern: stage{N}_elem{M}_{target}_{stem}.tmp
+std::string extract_format_from_temp_filename(const std::string& stem) {
+    // Must start with "stage"
+    if (stem.size() < 5 || stem.substr(0, 5) != "stage") {
+        return "";
+    }
+
+    // Find positions: stage{N}_elem{M}_{target}_{rest}
+    size_t first_underscore = stem.find('_');
+    if (first_underscore == std::string::npos)
+        return "";
+
+    size_t second_underscore = stem.find('_', first_underscore + 1);
+    if (second_underscore == std::string::npos)
+        return "";
+
+    size_t third_underscore = stem.find('_', second_underscore + 1);
+    if (third_underscore == std::string::npos)
+        return "";
+
+    // Extract format (between second and third underscore)
+    return stem.substr(second_underscore + 1, third_underscore - second_underscore - 1);
+}
+
 std::string detect_format(const std::filesystem::path& path) {
     auto ext = path.extension().string();
     if (!ext.empty() && ext[0] == '.') {
         ext = ext.substr(1);
     }
-    return to_lower(ext);
+    ext = to_lower(ext);
+
+    // Handle temp files with embedded format in filename
+    if (ext == "tmp") {
+        std::string stem = path.stem().string();
+        std::string embedded_format = extract_format_from_temp_filename(stem);
+        if (!embedded_format.empty()) {
+            return to_lower(embedded_format);
+        }
+    }
+
+    return ext;
 }
 
 core::FileCategory detect_category(const std::string& format) {
