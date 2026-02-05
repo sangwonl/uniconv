@@ -94,6 +94,10 @@ namespace uniconv::core
         {
             return execute_clipboard_node(node, graph, pipeline, result);
         }
+        else if (node.is_passthrough)
+        {
+            return execute_passthrough_node(node, graph, result);
+        }
         else
         {
             return execute_conversion_node(node, graph, pipeline, progress, result);
@@ -116,6 +120,32 @@ namespace uniconv::core
         stage_result.stage_index = node.stage_idx;
         stage_result.target = "tee";
         stage_result.plugin_used = "builtin:tee";
+        stage_result.input = node.input;
+        stage_result.output = node.temp_output;
+        stage_result.status = ResultStatus::Success;
+        stage_result.duration_ms = 0;
+        result.stage_results.push_back(stage_result);
+
+        return true;
+    }
+
+    bool PipelineExecutor::execute_passthrough_node(
+        ExecutionNode &node,
+        ExecutionGraph &graph,
+        PipelineResult &result)
+    {
+        // Passthrough just passes input through unchanged
+        node.input = get_node_input(node, graph);
+        node.temp_output = node.input; // Same as input
+        node.executed = true;
+        node.status = ResultStatus::Success;
+        node.plugin_used = "builtin:passthrough";
+
+        // Record stage result
+        StageResult stage_result;
+        stage_result.stage_index = node.stage_idx;
+        stage_result.target = node.target; // Keep original target name (_, echo, etc.)
+        stage_result.plugin_used = "builtin:passthrough";
         stage_result.input = node.input;
         stage_result.output = node.temp_output;
         stage_result.status = ResultStatus::Success;
@@ -268,8 +298,9 @@ namespace uniconv::core
             }
 
             // Determine if this node needs a file output
-            bool is_terminal = node.is_terminal();
-            bool only_clipboard_consumer = graph.is_only_consumed_by_clipboard(node_id);
+            // Use "effectively" methods to look through passthrough nodes
+            bool is_terminal = graph.is_effectively_terminal(node_id);
+            bool only_clipboard_consumer = graph.is_effectively_only_consumed_by_clipboard(node_id);
             bool content_was_copied = graph.was_content_copied_to_clipboard(node_id);
             bool clipboard_has_save = graph.clipboard_consumer_has_save(node_id);
             bool has_output_option = pipeline.core_options.output.has_value();

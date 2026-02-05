@@ -21,6 +21,7 @@ set(UNICONV_SOURCES
     ${CMAKE_SOURCE_DIR}/src/cli/pipeline_parser.cpp
     ${CMAKE_SOURCE_DIR}/src/builtins/tee.cpp
     ${CMAKE_SOURCE_DIR}/src/builtins/clipboard.cpp
+    ${CMAKE_SOURCE_DIR}/src/builtins/passthrough.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/file_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/string_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/json_output.cpp

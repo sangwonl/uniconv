@@ -52,47 +52,7 @@ void ExecutionGraph::build_from_pipeline(const Pipeline& pipeline) {
             continue;
         }
 
-        // Handle clipboard - a sink that passes through
-        if (stage.has_clipboard()) {
-            // Find the clipboard element to get its options
-            const StageElement* clip_elem = nullptr;
-            for (const auto& elem : stage.elements) {
-                if (elem.is_clipboard()) {
-                    clip_elem = &elem;
-                    break;
-                }
-            }
-
-            size_t clip_id = add_node();
-            auto& clip_node = nodes_[clip_id];
-            clip_node.stage_idx = stage_idx;
-            clip_node.element_idx = 0;
-            clip_node.target = "clipboard";
-            clip_node.is_clipboard = true;
-
-            // Copy clipboard element options (including --no-file)
-            if (clip_elem) {
-                clip_node.options = clip_elem->options;
-                clip_node.plugin_options = clip_elem->raw_options;
-            }
-
-            // Connect input
-            if (prev_stage_outputs.empty()) {
-                clip_node.input = source_;
-            } else {
-                clip_node.input_nodes = prev_stage_outputs;
-                for (size_t prev_id : prev_stage_outputs) {
-                    nodes_[prev_id].output_nodes.push_back(clip_id);
-                }
-            }
-
-            // Clipboard passes through (for potential chaining)
-            current_stage_outputs.push_back(clip_id);
-            prev_stage_outputs = current_stage_outputs;
-            continue;
-        }
-
-        // Regular conversion elements
+        // Regular conversion elements (including builtins like clipboard, passthrough)
         for (size_t elem_idx = 0; elem_idx < stage.elements.size(); ++elem_idx) {
             const auto& element = stage.elements[elem_idx];
 
@@ -104,6 +64,13 @@ void ExecutionGraph::build_from_pipeline(const Pipeline& pipeline) {
             node.plugin = element.plugin;
             node.plugin_options = element.raw_options;
             node.options = element.options;
+
+            // Set builtin flags
+            if (element.is_clipboard()) {
+                node.is_clipboard = true;
+            } else if (element.is_passthrough()) {
+                node.is_passthrough = true;
+            }
 
             // Connect input
             if (prev_stage_outputs.empty()) {
@@ -194,6 +161,61 @@ bool ExecutionGraph::clipboard_consumer_has_save(size_t node_id) const {
         }
     }
     return false;
+}
+
+bool ExecutionGraph::is_effectively_terminal(size_t node_id) const {
+    const auto& node = nodes_[node_id];
+
+    // If no consumers, it's terminal
+    if (node.output_nodes.empty()) {
+        return true;
+    }
+
+    // Check all consumers - if all are passthrough nodes that are effectively terminal,
+    // then this node is effectively terminal
+    for (size_t consumer_id : node.output_nodes) {
+        const auto& consumer = nodes_[consumer_id];
+        if (consumer.is_passthrough) {
+            // Recursively check if passthrough consumer is effectively terminal
+            if (!is_effectively_terminal(consumer_id)) {
+                return false;
+            }
+        } else {
+            // Non-passthrough consumer means not terminal
+            return false;
+        }
+    }
+    return true;
+}
+
+bool ExecutionGraph::is_effectively_only_consumed_by_clipboard(size_t node_id) const {
+    const auto& node = nodes_[node_id];
+
+    // If no consumers, not consumed by clipboard
+    if (node.output_nodes.empty()) {
+        return false;
+    }
+
+    // Check all consumers - looking through passthrough nodes
+    for (size_t consumer_id : node.output_nodes) {
+        const auto& consumer = nodes_[consumer_id];
+        if (consumer.is_clipboard) {
+            // Direct clipboard consumer - good
+            continue;
+        } else if (consumer.is_passthrough) {
+            // Look through passthrough - check what IT is consumed by
+            // If passthrough doesn't lead exclusively to clipboard, then this node
+            // is not only consumed by clipboard
+            if (!is_effectively_only_consumed_by_clipboard(consumer_id)) {
+                return false;
+            }
+            // Passthrough leads to clipboard, continue
+        } else {
+            // Non-clipboard, non-passthrough consumer
+            return false;
+        }
+    }
+    return true;
 }
 
 std::vector<size_t> ExecutionGraph::execution_order() const {

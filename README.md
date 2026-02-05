@@ -12,6 +12,7 @@
   <a href="#installation">Installation</a> &middot;
   <a href="#quick-start">Quick Start</a> &middot;
   <a href="#pipeline-syntax">Pipeline Syntax</a> &middot;
+  <a href="#builtin-stages">Builtin Stages</a> &middot;
   <a href="#plugins">Plugins</a> &middot;
   <a href="#contributing">Contributing</a>
 </p>
@@ -21,14 +22,14 @@
 uniconv converts files between formats using an intuitive pipeline syntax. Chain multiple operations, use community plugins, and build presets for repeated workflows — all from a single CLI.
 
 ```bash
-# Simple conversion
-uniconv "photo.heic | jpg"
+# Convert image to ASCII art
+uniconv "photo.jpg | ascii"
 
-# Pipeline with options
-uniconv "photo.heic | jpg --quality 90 | grayscale"
+# Resize video and convert to GIF
+uniconv "clip.mp4 | gif --width 480 --fps 15"
 
-# Fan out to multiple formats
-uniconv "photo.heic | tee | jpg, png, webp"
+# Fan out: save PNG locally, copy to clipboard
+uniconv "photo.heic | tee | png, clipboard"
 ```
 
 ## Why uniconv?
@@ -78,22 +79,28 @@ curl -fsSL https://raw.githubusercontent.com/uniconv/uniconv/main/install.sh | b
 
 ```bash
 # Convert a HEIC photo to JPEG
-uniconv "photo.heic | jpg"
-
-# Convert with quality setting
 uniconv "photo.heic | jpg --quality 85"
 
-# Convert a video to GIF
-uniconv "clip.mov | gif"
+# Convert image to ASCII art
+uniconv "photo.jpg | ascii --width 80"
+
+# Create a GIF from video (resized, 15fps)
+uniconv "video.mp4 | gif --width 320 --fps 15"
+
+# Resize video to 720p
+uniconv "video.mp4 | mp4 --height 720"
+
+# Apply grayscale filter
+uniconv "photo.jpg | grayscale"
 
 # Get file info
 uniconv info photo.heic
 
-# See available formats
-uniconv formats
-
 # Install the essentials plugin collection
 uniconv plugin install +essentials
+
+# Update uniconv to the latest version
+uniconv update
 ```
 
 ## Pipeline Syntax
@@ -110,20 +117,11 @@ uniconv "<source> | <target> [options] | <target> [options] | ..."
 # Single conversion
 uniconv "photo.heic | jpg"
 
-# Chained conversions
-uniconv "photo.heic | jpg --quality 90 | grayscale"
+# Chained conversions (resize then apply filter)
+uniconv "photo.jpg | png --width 800 | grayscale"
 
 # Specify output path
-uniconv -o output.jpg "photo.heic | jpg"
-```
-
-### Branching with tee
-
-Use `tee` to fan out into multiple parallel targets:
-
-```bash
-# Convert to three formats at once
-uniconv "photo.heic | tee | jpg, png, webp"
+uniconv -o thumbnail.gif "video.mp4 | gif --width 320 --fps 10"
 ```
 
 ### Explicit plugin selection
@@ -131,8 +129,8 @@ uniconv "photo.heic | tee | jpg, png, webp"
 When multiple plugins can handle a target, pin a specific one with `@`:
 
 ```bash
-# Use the ffmpeg scope for mp4 conversion
-uniconv "video.mov | mp4@ffmpeg"
+# Use the ffmpeg plugin for mp4 conversion
+uniconv "video.mov | mp4@ffmpeg --height 720"
 ```
 
 ### Presets
@@ -149,6 +147,60 @@ uniconv --preset web-ready photo.heic
 # List presets
 uniconv preset list
 ```
+
+## Builtin Stages
+
+uniconv includes built-in stages for pipeline control and system integration.
+
+### tee — Branching
+
+Split a pipeline into multiple parallel branches:
+
+```bash
+# Convert to multiple formats at once
+uniconv "photo.heic | tee | jpg, png, webp"
+
+# Different quality settings for each branch
+uniconv "photo.jpg | tee | jpg --quality 90, jpg --quality 50 --width 200"
+```
+
+### clipboard — Copy to System Clipboard
+
+Copy output directly to system clipboard:
+
+```bash
+# Convert and copy image to clipboard (no file saved)
+uniconv "photo.heic | png | clipboard"
+
+# Copy ASCII art to clipboard
+uniconv "photo.jpg | ascii | clipboard"
+
+# Save file AND copy to clipboard
+uniconv "photo.heic | png | clipboard --save"
+
+# With explicit output path
+uniconv -o result.png "photo.heic | png | clipboard"
+```
+
+**Behavior:**
+- Image/text formats: content is copied directly to clipboard
+- Other formats: file path is copied to clipboard
+- By default, no file is created when clipboard is terminal (use `--save` or `-o` to save)
+
+### _ (passthrough) — No-op Stage
+
+Pass input through unchanged. Useful for matching `tee` branches when you only want to process some of them:
+
+```bash
+# Convert to PNG and copy to clipboard, pass through original to save
+uniconv "photo.heic | tee | png, ascii | _, clipboard"
+# -> PNG saved to file, ASCII copied to clipboard
+
+# Skip one branch entirely
+uniconv "video.mp4 | tee | gif --width 320, _ | clipboard, _"
+```
+
+**Aliases:** `_`, `echo`, `bypass`, `pass`, `noop`
 
 ## Plugins
 
@@ -224,6 +276,7 @@ uniconv <command> [args]
 |---------|-------------|
 | `info <file>` | Show file details (format, size, dimensions) |
 | `formats` | List supported formats |
+| `update` | Update uniconv to the latest version |
 | `plugin list` | List installed plugins |
 | `plugin install <name>` | Install a plugin or collection |
 | `plugin remove <name>` | Uninstall a plugin |

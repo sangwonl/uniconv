@@ -60,6 +60,11 @@ namespace uniconv::core
                                    const Pipeline &pipeline,
                                    PipelineResult &result);
 
+        // Execute passthrough node (just pass through unchanged)
+        bool execute_passthrough_node(ExecutionNode &node,
+                                     ExecutionGraph &graph,
+                                     PipelineResult &result);
+
         // Execute conversion node
         bool execute_conversion_node(ExecutionNode &node,
                                     ExecutionGraph &graph,

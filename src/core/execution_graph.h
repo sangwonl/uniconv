@@ -35,15 +35,18 @@ struct ExecutionNode {
     // Builtin flags
     bool is_tee = false;
     bool is_clipboard = false;
+    bool is_passthrough = false;
 
     // Execution state
     bool executed = false;
     bool content_copied_to_clipboard = false;        // For clipboard nodes
 
     // Helper methods
-    bool is_builtin() const { return is_tee || is_clipboard; }
+    bool is_builtin() const { return is_tee || is_clipboard || is_passthrough; }
     bool is_terminal() const { return output_nodes.empty(); }
-    bool has_file_output() const { return !is_tee && !is_clipboard; }
+    // Only conversion nodes produce new files
+    // tee, clipboard, and passthrough do not produce new files
+    bool has_file_output() const { return !is_tee && !is_clipboard && !is_passthrough; }
 };
 
 // The execution graph tracks all nodes and their relationships
@@ -76,6 +79,13 @@ public:
 
     // Check if clipboard consumer has --save option
     bool clipboard_consumer_has_save(size_t node_id) const;
+
+    // Check if a node is effectively terminal (terminal when looking through passthrough)
+    // A node is effectively terminal if all paths through passthrough nodes lead to terminal
+    bool is_effectively_terminal(size_t node_id) const;
+
+    // Check if a node's output is only consumed by clipboard (looking through passthrough)
+    bool is_effectively_only_consumed_by_clipboard(size_t node_id) const;
 
     // Get the source file path
     const std::filesystem::path& source() const { return source_; }

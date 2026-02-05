@@ -68,6 +68,7 @@ add_executable(uniconv
     src/plugins/plugin_interface.h
     src/builtins/tee.cpp
     src/builtins/clipboard.cpp
+    src/builtins/passthrough.cpp
     src/cli/parser.h
     src/cli/parser.cpp
     src/cli/pipeline_parser.cpp

@@ -19,6 +19,10 @@ struct StageElement {
 
     bool is_tee() const { return target == "tee"; }
     bool is_clipboard() const { return target == "clipboard"; }
+    bool is_passthrough() const {
+        return target == "_" || target == "echo" || target == "bypass" ||
+               target == "pass" || target == "noop";
+    }
 
     nlohmann::json to_json() const {
         nlohmann::json j;
