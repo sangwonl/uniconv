@@ -262,10 +262,6 @@ int main(int argc, char **argv)
                         output->info("  -> " + out.string());
                     }
                 }
-                else if (result.error)
-                {
-                    output->error(*result.error);
-                }
             }
             return result.success ? 0 : 1;
         }

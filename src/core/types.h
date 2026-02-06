@@ -183,10 +183,11 @@ namespace uniconv::core
     struct Request
     {
         std::filesystem::path source;
-        std::string target;                // "jpg", "faces", "gdrive", etc.
-        std::optional<std::string> plugin; // Optional explicit plugin scope
+        std::string target;                       // "jpg", "faces", "gdrive", etc.
+        std::optional<std::string> plugin;        // Optional explicit plugin scope
+        std::optional<std::string> input_format;  // Input format hint (for temp files)
         CoreOptions core_options;
-        std::vector<std::string> plugin_options; // Options after --
+        std::vector<std::string> plugin_options;  // Options after --
 
         nlohmann::json to_json() const
         {
@@ -195,6 +196,8 @@ namespace uniconv::core
             j["target"] = target;
             if (plugin)
                 j["plugin"] = *plugin;
+            if (input_format)
+                j["input_format"] = *input_format;
             j["core_options"] = core_options.to_json();
             j["plugin_options"] = plugin_options;
             return j;

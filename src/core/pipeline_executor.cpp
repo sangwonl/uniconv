@@ -247,6 +247,16 @@ namespace uniconv::core
         request.core_options.output = node.temp_output;
         request.plugin_options = node.plugin_options;
 
+        // For temp files, extract the actual format from filename pattern
+        if (node.input.extension() == ".tmp")
+        {
+            std::string format = extract_transform_from_temp(node.input);
+            if (!format.empty())
+            {
+                request.input_format = format;
+            }
+        }
+
         // Execute through engine
         auto etl_result = engine_->execute(request);
 

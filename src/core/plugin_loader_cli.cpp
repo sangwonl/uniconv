@@ -406,6 +406,12 @@ namespace uniconv::core
         args.push_back("--target");
         args.push_back(request.target);
 
+        if (request.input_format)
+        {
+            args.push_back("--input-format");
+            args.push_back(*request.input_format);
+        }
+
         if (request.core_options.output)
         {
             args.push_back("--output");
