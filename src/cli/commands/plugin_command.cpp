@@ -115,6 +115,9 @@ namespace uniconv::cli::commands
             }
             if (p.targets.size() > 5)
                 targets += ",...";
+            // Truncate targets to fit column
+            if (targets.size() > 27)
+                targets = targets.substr(0, 24) + "...";
 
             text << std::left
                  << std::setw(25) << p.id
@@ -136,11 +139,17 @@ namespace uniconv::cli::commands
             }
             if (m.targets.size() > 5)
                 targets += ",...";
+            // Truncate targets to fit column
+            if (targets.size() > 27)
+                targets = targets.substr(0, 24) + "...";
 
             std::string source = installed_.is_registry_installed(m.name) ? "registry" : "local";
 
+            // Show scope/name for third-party plugins, just name for official (uniconv)
+            std::string display_name = (m.scope != "uniconv") ? m.scope + "/" + m.name : m.name;
+
             text << std::left
-                 << std::setw(25) << m.id()
+                 << std::setw(25) << display_name
                  << std::setw(30) << targets
                  << std::setw(10) << m.version
                  << std::setw(12) << source
