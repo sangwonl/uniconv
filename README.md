@@ -22,14 +22,17 @@
 uniconv converts files between formats using an intuitive pipeline syntax. Chain multiple operations, use community plugins, and build presets for repeated workflows — all from a single CLI.
 
 ```bash
+# Convert HEIC to JPEG
+uniconv photo.heic "jpg --quality 85"
+
 # Convert image to ASCII art
-uniconv photo.jpg "ascii"
+uniconv photo.jpg "ascii --width 80"
 
-# Resize video and convert to GIF
-uniconv clip.mp4 "gif --width 480 --fps 15"
+# Multi-stage pipeline: image → PDF → DOCX
+uniconv photo.jpg "pdf | docx"
 
-# Fan out: save PNG locally, copy to clipboard
-uniconv photo.heic "tee | png, clipboard"
+# Fan out to multiple formats
+uniconv photo.heic "tee | jpg, png, webp"
 ```
 
 ## Why uniconv?
@@ -78,26 +81,32 @@ curl -fsSL https://raw.githubusercontent.com/uniconv/uniconv/main/install.sh | b
 ## Quick Start
 
 ```bash
+# Install the essentials plugin collection (recommended first step)
+uniconv plugin install +essentials
+
 # Convert a HEIC photo to JPEG
 uniconv photo.heic "jpg --quality 85"
 
 # Convert image to ASCII art
 uniconv photo.jpg "ascii --width 80"
 
-# Create a GIF from video (resized, 15fps)
+# Apply grayscale filter to image
+uniconv photo.jpg "grayscale"
+
+# Convert video to GIF (resized, 15fps)
 uniconv video.mp4 "gif --width 320 --fps 15"
 
 # Resize video to 720p
 uniconv video.mp4 "mp4 --height 720"
 
-# Apply grayscale filter
-uniconv photo.jpg "grayscale"
+# Convert document: DOCX to PDF
+uniconv document.docx "pdf"
+
+# Multi-stage: image → PDF → DOCX
+uniconv photo.jpg "pdf | docx"
 
 # Get file info
 uniconv info photo.heic
-
-# Install the essentials plugin collection
-uniconv plugin install +essentials
 
 # Update uniconv to the latest version
 uniconv update
@@ -117,8 +126,11 @@ uniconv <source> "<target> [options] | <target> [options] | ..."
 # Single conversion
 uniconv photo.heic "jpg"
 
-# Chained conversions (resize then apply filter)
-uniconv photo.jpg "png --width 800 | grayscale"
+# Chained conversions (convert then apply filter)
+uniconv photo.heic "jpg | grayscale"
+
+# Multi-stage document conversion
+uniconv photo.jpg "pdf | docx"
 
 # Specify output path
 uniconv -o thumbnail.gif video.mp4 "gif --width 320 --fps 10"
@@ -238,12 +250,13 @@ uniconv plugin remove ascii
 
 ### Available plugins
 
-| Plugin | Type | Description |
-|--------|------|-------------|
-| `ascii` | CLI (Python) | Convert images to ASCII art |
-| `image-filter` | CLI (Python) | Apply filters (grayscale, invert) |
-| `image-convert` | Native (C++) | Image format conversion via libvips |
-| `video-convert` | Native (C++) | Video format conversion via FFmpeg |
+| Plugin | Type | Targets | Description |
+|--------|------|---------|-------------|
+| `image-convert` | Native (C++) | jpg, png, webp, gif, heic, ... | Image format conversion via libvips |
+| `video-convert` | Native (C++) | mp4, mov, avi, webm, gif, ... | Video format conversion via FFmpeg |
+| `doc-convert` | CLI (Python) | pdf, docx, odt, xlsx, md, ... | Document conversion via LibreOffice |
+| `ascii` | CLI (Python) | ascii, ascii-art, text-art | Convert images to ASCII art |
+| `image-filter` | CLI (Python) | grayscale, invert, negative | Apply image filters |
 
 Want to write your own plugin? See the [Contributing Guide](CONTRIBUTING.md#writing-plugins).
 

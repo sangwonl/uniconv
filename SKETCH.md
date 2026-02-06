@@ -48,45 +48,50 @@
 ### 2.1 기본 구조
 
 ```bash
-uniconv [core옵션] "<source> | <target>[@plugin] [옵션] | <target>[@plugin] [옵션] | ..."
+uniconv [core옵션] <source> "<target>[@plugin] [옵션] | <target>[@plugin] [옵션] | ..."
 ```
 
-**중요: 파이프라인은 반드시 따옴표로 감싸야 함** (쉘 `|` 연산자와 충돌 방지)
+**중요: 파이프라인(타겟 체인)은 반드시 따옴표로 감싸야 함** (쉘 `|` 연산자와 충돌 방지)
 
 - `|` = 스테이지 구분
 - `,` = 같은 스테이지 내 병렬 요소
 - `tee` = 다음 스테이지 요소 개수만큼 복제하는 builtin
+- `clipboard` = 결과를 시스템 클립보드에 복사
+- `_` (passthrough) = 입력을 그대로 전달
 
 ### 2.2 기본 예시
 
 ```bash
 # 단일 변환
-uniconv "photo.heic | jpg"
-uniconv "photo.heic | jpg --quality 90"
-uniconv "video.mov | mp4"
+uniconv photo.heic "jpg"
+uniconv photo.heic "jpg --quality 90"
+uniconv video.mov "mp4"
 
-# 단일 추출
-uniconv "photo.jpg | faces"
-uniconv "video.mp4 | audio"
-uniconv "receipt.jpg | data"
+# 이미지 필터
+uniconv photo.jpg "grayscale"
+uniconv photo.jpg "ascii --width 80"
 
-# 단일 적재
-uniconv "photo.jpg | gdrive --folder /photos"
+# 문서 변환
+uniconv document.docx "pdf"
+uniconv photo.jpg "pdf | docx"    # 다단계: 이미지 → PDF → DOCX
 
-# 순차 파이프라인
-uniconv "photo.heic | jpg | gdrive"
-uniconv "video.mp4 | audio | mp3"
-uniconv "video.mp4 | highlights | gif"
-uniconv "video.mp4 | highlights | gif | gdrive"
+# 비디오 변환
+uniconv video.mp4 "gif --width 320 --fps 15"
+uniconv video.mp4 "mp4 --height 720"
+
+# 클립보드로 복사
+uniconv photo.jpg "png | clipboard"
+
+# 출력 경로 지정
+uniconv -o output.jpg photo.heic "jpg --quality 85"
 ```
 
 ### 2.3 플러그인 지정
 
 ```bash
-# @로 플러그인 지정
-uniconv "photo.heic | jpg@vips --quality 90"
-uniconv "photo.jpg | faces@mediapipe --confidence 0.9"
-uniconv "video.mov | mp4@ffmpeg --crf 23"
+# @로 플러그인 지정 (같은 타겟을 여러 플러그인이 지원할 때)
+uniconv photo.heic "jpg@image-convert --quality 90"
+uniconv video.mov "mp4@video-convert --crf 23"
 ```
 
 ### 2.4 tee를 이용한 분기
@@ -95,22 +100,19 @@ uniconv "video.mov | mp4@ffmpeg --crf 23"
 
 ```bash
 # 하나를 여러 포맷으로
-uniconv "photo.heic | tee | jpg, png, webp"
+uniconv photo.heic "tee | jpg, png, webp"
 
 #   photo.heic → tee (3개 복제)
 #                  → [0] jpg
 #                  → [1] png
 #                  → [2] webp
 
-# 하나를 여러 곳에 업로드
-uniconv "photo.jpg | tee | gdrive, s3, dropbox"
-
 # 변환 후 분기
-uniconv "photo.heic | jpg | tee | gdrive, s3"
+uniconv photo.heic "jpg | tee | grayscale, invert"
 
 #   photo.heic → jpg → tee (2개 복제)
-#                        → [0] gdrive
-#                        → [1] s3
+#                        → [0] grayscale
+#                        → [1] invert
 ```
 
 ### 2.5 분기 후 각각 다른 처리
@@ -118,31 +120,19 @@ uniconv "photo.heic | jpg | tee | gdrive, s3"
 분기된 각 요소는 독립적인 파이프라인을 가질 수 있음.
 
 ```bash
-uniconv "photo.heic | jpg | tee | gdrive --folder /photos, s3 --bucket backup"
+uniconv photo.heic "tee | jpg --quality 90, png, webp --quality 80"
 
-#   photo.heic → jpg → tee (2개 복제)
-#                        → [0] gdrive --folder /photos
-#                        → [1] s3 --bucket backup
-
-uniconv "photo.heic | tee | jpg --quality 90, png --quality 10"
-
-#   photo.heic → tee (2개 복제)
+#   photo.heic → tee (3개 복제)
 #                  → [0] jpg --quality 90
-#                  → [1] png --quality 10
+#                  → [1] png
+#                  → [2] webp --quality 80
 
 # 분기 후 계속 진행
-uniconv "photo.heic | tee | jpg | gdrive, png | s3"
+uniconv photo.jpg "tee | grayscale | clipboard, png"
 
-#   photo.heic → tee (2개 복제)
-#                  → [0] jpg → gdrive
-#                  → [1] png → s3
-
-# 복잡한 예시
-uniconv "video.mp4 | highlights | tee | gif | gdrive, mp4 --quality high | s3"
-
-#   video.mp4 → highlights → tee (2개 복제)
-#                              → [0] gif → gdrive
-#                              → [1] mp4 --quality high → s3
+#   photo.jpg → tee (2개 복제)
+#                 → [0] grayscale → clipboard
+#                 → [1] png (파일 저장)
 ```
 
 ### 2.6 스테이지 요소 개수 규칙
@@ -156,19 +146,19 @@ uniconv "video.mp4 | highlights | tee | gif | gdrive, mp4 --quality high | s3"
 
 ```bash
 # ✅ 1 → 1 → 1
-uniconv "photo.heic | jpg | gdrive"
+uniconv photo.heic "jpg | grayscale"
 
-# ✅ 1 → tee → 3 → 3
-uniconv "photo.heic | tee | jpg, png, webp | gdrive, s3, dropbox"
+# ✅ 1 → tee → 3
+uniconv photo.heic "tee | jpg, png, webp"
 
-# ✅ 1 → 1 → tee → 2 → 2
-uniconv "photo.heic | jpg | tee | gdrive, s3 | notion, slack"
+# ✅ 1 → 1 → tee → 2
+uniconv photo.heic "jpg | tee | grayscale, invert"
 
 # ❌ 1 → 2 (tee 없이 늘어남)
-uniconv "photo.heic | jpg, png"
+uniconv photo.heic "jpg, png"
 
 # ❌ 2 → 3 (개수 불일치)
-uniconv "photo.heic | tee | jpg, png | gdrive, s3, dropbox"
+uniconv photo.heic "tee | jpg, png | grayscale, invert, negative"
 ```
 
 ### 2.7 Interactive 모드
@@ -199,31 +189,34 @@ uniconv --interactive photo.heic
 
 ### 3.2 Builtin 타겟
 
-| 타입          | 타겟        |
-| ------------- | ----------- |
-| tee (builtin) | 분기용 복제 |
+| 타겟              | 설명                                      |
+| ----------------- | ----------------------------------------- |
+| `tee`             | 다음 스테이지로 분기 (입력을 N개로 복제)  |
+| `clipboard`       | 결과를 시스템 클립보드에 복사             |
+| `_` (passthrough) | 입력을 그대로 전달 (분기 시 일부만 처리)  |
 
-### 3.3 내장 플러그인 타겟
+**clipboard 동작:**
+- 이미지/텍스트 포맷: 콘텐츠를 클립보드에 직접 복사
+- 기타 포맷: 파일 경로를 클립보드에 복사
+- 기본적으로 파일 미생성 (`--save` 또는 `-o`로 파일 저장)
 
-#### Transform
+**passthrough 별칭:** `_`, `echo`, `bypass`, `pass`, `noop`
 
-**이미지:**
+### 3.3 현재 사용 가능한 플러그인
 
-- jpg, jpeg, png, webp, gif, bmp, tiff, pdf, heic
+| 플러그인         | 타입           | 지원 타겟                              |
+| ---------------- | -------------- | -------------------------------------- |
+| `image-convert`  | Native (C++)   | jpg, png, webp, gif, heic, bmp, tiff   |
+| `video-convert`  | Native (C++)   | mp4, mov, avi, webm, mkv, gif          |
+| `doc-convert`    | CLI (Python)   | pdf, docx, odt, xlsx, pptx, md, html   |
+| `ascii`          | CLI (Python)   | ascii, ascii-art, text-art             |
+| `image-filter`   | CLI (Python)   | grayscale, invert, negative            |
 
-**비디오:**
-
-- mp4, webm, mkv, avi, mov, gif
-
-**오디오:**
-
-- mp3, wav, m4a, ogg, flac
-
-#### Extract
-
-- audio (비디오에서 오디오)
-- frames (비디오에서 프레임)
-- thumbnail (비디오 썸네일)
+**설치:**
+```bash
+uniconv plugin install +essentials    # 모든 기본 플러그인
+uniconv plugin install image-convert  # 개별 플러그인
+```
 
 ---
 
@@ -311,8 +304,10 @@ struct Result {
 CLI 플러그인 호출 규약:
 
 ```bash
-<executable> --input <path> --output <path> --target <target> [플러그인 옵션]
+<executable> --input <path> --output <path> --target <target> [--input-format <fmt>] [플러그인 옵션]
 ```
+
+**참고:** 다단계 파이프라인에서 중간 파일은 `.tmp` 확장자를 사용. 이때 `--input-format`으로 실제 포맷 힌트가 전달됨.
 
 stdout으로 JSON 결과 출력:
 
@@ -422,26 +417,24 @@ uniconv config set default.faces mediapipe
 ```bash
 $ uniconv plugin list
 
-NAME                    ETL         TARGETS                         VERSION
-image-core.transform    transform   jpg,png,webp,heic               0.1.0 (built-in)
-ffmpeg.transform        transform   mp4,webm,mkv,gif,mp3,wav        0.1.0 (built-in)
-ffmpeg.extract          extract     audio,frames,thumbnail          0.1.0 (built-in)
-ai-vision.extract       extract     faces,text,objects,labels       1.2.0
-gdrive.load             load        gdrive                          0.5.0
+NAME                     TARGETS                       VERSION   SOURCE
+-----------------------------------------------------------------------------
+ascii                    ascii,ascii-art,text-art      1.0.7     registry
+image-filter             grayscale,gray,bw,invert...   1.0.5     registry
+image-convert            jpg,jpeg,png,webp,gif,...     1.0.16    registry
+doc-convert              pdf,docx,doc,odt,rtf,...      1.0.6     registry
+video-convert            mp4,mov,avi,webm,mkv,...      1.1.11    registry
 
-$ uniconv plugin list --target faces
+$ uniconv plugin info image-convert
 
-TARGET    PLUGIN                  VERSION   DEFAULT
-faces     ai-vision.extract       1.2.0     ✓
-faces     face-yolo.extract       2.0.0
-faces     face-mediapipe.extract  1.1.0
-
-$ uniconv plugin list --scope ffmpeg
-
-SCOPE       ffmpeg
-PLUGINS
-  ffmpeg.transform    mp4, webm, mkv, avi, gif, mp3, wav
-  ffmpeg.extract      audio, frames, thumbnail, subtitle
+Name:        image-convert
+Scope:       uniconv
+Version:     1.0.16
+Description: Image format conversion via libvips
+Type:        native
+Source:      registry
+Targets:     jpg, jpeg, png, webp, gif, bmp, tiff, heic, avif
+Inputs:      jpg, jpeg, png, webp, gif, bmp, tiff, heic, avif, pdf
 ```
 
 ### 4.8 플러그인 충돌 해결
@@ -522,10 +515,10 @@ uniconv config set default.faces mediapipe
 
 ### 6.1 Core 옵션
 
-Core 옵션은 파이프라인 앞에 위치:
+Core 옵션은 소스 파일 앞에 위치:
 
 ```bash
-uniconv [core옵션] "<source> | ..."
+uniconv [core옵션] <source> "<pipeline>"
 ```
 
 | 옵션                  | 설명                  |
@@ -589,31 +582,31 @@ uniconv config list
 ### 6.4 JSON 출력
 
 ```bash
-$ uniconv --json "photo.heic | jpg | gdrive"
+$ uniconv --json photo.heic "jpg | grayscale"
 ```
 
 ```json
 {
   "success": true,
-  "pipeline": [
+  "stage_results": [
     {
-      "stage": 0,
+      "stage_index": 0,
       "target": "jpg",
-      "plugin": "image-core.transform",
+      "plugin_used": "image-convert",
       "input": "photo.heic",
-      "output": "/tmp/uniconv/photo.jpg",
-      "duration_ms": 234
+      "output": "/tmp/uniconv/stage0_elem0_jpg_photo.tmp",
+      "status": "success"
     },
     {
-      "stage": 1,
-      "target": "gdrive",
-      "plugin": "gdrive.load",
-      "input": "/tmp/uniconv/photo.jpg",
-      "output": "gdrive://photos/photo.jpg",
-      "duration_ms": 1523
+      "stage_index": 1,
+      "target": "grayscale",
+      "plugin_used": "image-filter",
+      "input": "/tmp/uniconv/stage0_elem0_jpg_photo.tmp",
+      "output": "/path/to/photo_grayscale.jpg",
+      "status": "success"
     }
   ],
-  "total_duration_ms": 1757
+  "final_outputs": ["/path/to/photo_grayscale.jpg"]
 }
 ```
 
@@ -628,21 +621,21 @@ $ uniconv --json "photo.heic | jpg | gdrive"
 ```bash
 # 파이프라인을 프리셋으로 저장
 uniconv preset create insta "jpg --quality 85 --width 1080"
-uniconv preset create backup "tee | gdrive, s3"
-uniconv preset create video-gif "highlights | gif --fps 15"
+uniconv preset create multi-format "tee | jpg, png, webp"
+uniconv preset create video-gif "gif --width 320 --fps 15"
 ```
 
 ### 7.2 프리셋 사용
 
 ```bash
 uniconv --preset insta photo.heic
-# = uniconv "photo.heic | jpg --quality 85 --width 1080"
+# = uniconv photo.heic "jpg --quality 85 --width 1080"
 
-uniconv --preset backup photo.jpg
-# = uniconv "photo.jpg | tee | gdrive, s3"
+uniconv --preset multi-format photo.jpg
+# = uniconv photo.jpg "tee | jpg, png, webp"
 
 uniconv --preset video-gif video.mp4
-# = uniconv "video.mp4 | highlights | gif --fps 15"
+# = uniconv video.mp4 "gif --width 320 --fps 15"
 ```
 
 ### 7.3 프리셋 저장 위치
@@ -669,17 +662,17 @@ uniconv --preset video-gif video.mp4
 ## 8. Watch 모드
 
 ```bash
-# 기본
+# 기본: 폴더 감시하며 자동 변환
 uniconv watch ./incoming "jpg"
 
 # 프리셋과 함께
-uniconv watch -p insta ./incoming ""
+uniconv watch --preset insta ./incoming
 
 # 출력 경로 지정
 uniconv watch -o ./processed ./incoming "jpg"
 
 # 파이프라인
-uniconv watch ./incoming "jpg | gdrive"
+uniconv watch ./incoming "jpg | grayscale"
 
 # 재귀적 감시
 uniconv watch -r ./incoming "jpg"
@@ -897,31 +890,37 @@ uniconv plugin init --lang python my-plugin
 
 ## 14. 마일스톤
 
-### Phase 1: MVP
+### Phase 1: MVP ✅
 
-- [ ] 파이프라인 파서
-- [ ] 기본 파이프라인 실행 (단일 스테이지)
-- [ ] 이미지 변환 (HEIC, JPG, PNG, WebP)
-- [ ] JSON 출력
+- [x] 파이프라인 파서
+- [x] 기본 파이프라인 실행 (단일 스테이지)
+- [x] 이미지 변환 (HEIC, JPG, PNG, WebP)
+- [x] JSON 출력
 
-### Phase 2: 파이프라인 확장
+### Phase 2: 파이프라인 확장 ✅
 
-- [ ] 다중 스테이지 파이프라인
-- [ ] tee builtin (분기)
-- [ ] 프리셋 시스템
+- [x] 다중 스테이지 파이프라인
+- [x] tee builtin (분기)
+- [x] 프리셋 시스템
+- [x] clipboard builtin
+- [x] passthrough builtin (_)
+- [x] `--input-format` 힌트 (다단계 파이프라인용)
 
-### Phase 3: 플러그인 시스템
+### Phase 3: 플러그인 시스템 ✅
 
-- [ ] Native 플러그인 로더
-- [ ] CLI 플러그인 로더
-- [ ] 플러그인 관리 명령어
-- [ ] 기본 플러그인 설정
+- [x] Native 플러그인 로더
+- [x] CLI 플러그인 로더
+- [x] 플러그인 관리 명령어
+- [x] 플러그인 레지스트리
+- [x] 플러그인 컬렉션 (+essentials)
+- [x] Python 의존성 자동 설치
 
-### Phase 4: 확장 기능
+### Phase 4: 확장 기능 (진행 중)
 
-- [ ] 비디오 변환 (ffmpeg)
+- [x] 비디오 변환 (video-convert 플러그인)
+- [x] 문서 변환 (doc-convert 플러그인)
+- [x] Watch 모드
 - [ ] Interactive 모드
-- [ ] Watch 모드
 
 ### Phase 5: 플랫폼 통합
 
@@ -933,5 +932,4 @@ uniconv plugin init --lang python my-plugin
 
 - [ ] Extract 플러그인 (faces, text, ...)
 - [ ] Load 플러그인 (gdrive, s3, ...)
-- [ ] 플러그인 레지스트리
 - [ ] 플러그인 SDK

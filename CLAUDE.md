@@ -37,15 +37,23 @@ All operations follow ETL philosophy (determined automatically from target):
 ### Pipeline Syntax
 
 ```bash
-# Pipeline must be quoted to prevent shell interpretation of |
-uniconv "source | stage1 | stage2 | stage3"
-uniconv "photo.heic | jpg --quality 90 | tee | gdrive, s3"
-uniconv -o output.png "photo.jpg | png"
+# Basic: source file followed by quoted pipeline
+uniconv photo.heic "jpg --quality 90"
+
+# Multi-stage pipeline
+uniconv photo.jpg "pdf | docx"
+
+# Branching with tee
+uniconv photo.heic "tee | jpg, png, webp"
+
+# Output path option
+uniconv -o output.png photo.jpg "png"
 ```
 - `|` separates stages (sequential execution)
 - `,` separates elements within stage (parallel/branching)
 - `tee` builtin replicates output for branching
 - Plugin-specific options (--quality, --width, --height) go with the target
+- `--input-format` is passed to plugins for temp files in multi-stage pipelines
 
 ### CLI Options
 
