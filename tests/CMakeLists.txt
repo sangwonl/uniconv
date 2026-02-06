@@ -32,6 +32,8 @@ set(UNICONV_SOURCES
     ${CMAKE_SOURCE_DIR}/src/core/dependency_installer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/installed_plugins.cpp
     ${CMAKE_SOURCE_DIR}/src/core/registry_client.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/output/console_output.cpp
+    ${CMAKE_SOURCE_DIR}/src/core/output/json_output.cpp
 )
 
 # Test executable
@@ -45,6 +47,7 @@ add_executable(uniconv_tests
     unit/test_registry_types.cpp
     unit/test_installed_plugins.cpp
     unit/test_clipboard.cpp
+    unit/test_output_progress.cpp
     ${UNICONV_SOURCES}
 )
 
@@ -52,6 +55,7 @@ target_link_libraries(uniconv_tests PRIVATE
     GTest::gtest_main
     CLI11::CLI11
     nlohmann_json::nlohmann_json
+    Threads::Threads
 )
 
 target_include_directories(uniconv_tests PRIVATE

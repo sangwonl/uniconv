@@ -63,6 +63,7 @@ add_executable(uniconv
     src/core/output/console_output.cpp
     src/core/output/json_output.h
     src/core/output/json_output.cpp
+    src/core/output/spinner.h
     src/core/plugin_loader_native.h
     src/core/plugin_loader_native.cpp
     src/core/pipeline_executor.cpp
@@ -115,9 +116,12 @@ target_include_directories(uniconv PRIVATE
     ${CMAKE_BINARY_DIR}/include
 )
 
+find_package(Threads REQUIRED)
+
 target_link_libraries(uniconv PRIVATE
     CLI11::CLI11
     nlohmann_json::nlohmann_json
+    Threads::Threads
 )
 
 if(UNICONV_ENABLE_WARNINGS)

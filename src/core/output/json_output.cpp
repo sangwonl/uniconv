@@ -53,8 +53,34 @@ void JsonOutput::help(std::string_view text) {
     out_ << text;
 }
 
-void JsonOutput::progress(std::string_view /*task*/, int /*percent*/) {
-    // No-op for now, future-ready
+void JsonOutput::stage_started(size_t current, size_t total, const std::string& target) {
+    if (quiet_) return;
+
+    nlohmann::json j;
+    j["type"] = "progress";
+    j["current"] = current;
+    j["total"] = total;
+    j["target"] = target;
+    j["phase"] = "started";
+    err_ << j.dump() << "\n" << std::flush;
+}
+
+void JsonOutput::stage_completed(size_t current, size_t total, const std::string& target,
+                                 int64_t duration_ms, bool success, const std::string& error) {
+    if (quiet_) return;
+
+    nlohmann::json j;
+    j["type"] = "progress";
+    j["current"] = current;
+    j["total"] = total;
+    j["target"] = target;
+    j["phase"] = "completed";
+    j["duration_ms"] = duration_ms;
+    j["success"] = success;
+    if (!success && !error.empty()) {
+        j["error"] = error;
+    }
+    err_ << j.dump() << "\n" << std::flush;
 }
 
 bool JsonOutput::is_verbose() const {

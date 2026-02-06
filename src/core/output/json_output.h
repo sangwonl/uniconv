@@ -23,7 +23,9 @@ public:
 
     void help(std::string_view text) override;
 
-    void progress(std::string_view task, int percent) override;
+    void stage_started(size_t current, size_t total, const std::string& target) override;
+    void stage_completed(size_t current, size_t total, const std::string& target,
+                         int64_t duration_ms, bool success, const std::string& error = "") override;
 
     bool is_verbose() const override;
     bool is_quiet() const override;

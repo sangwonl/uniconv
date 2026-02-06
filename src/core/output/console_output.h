@@ -2,8 +2,10 @@
 #define UNICONV_CORE_OUTPUT_CONSOLE_OUTPUT_H
 
 #include "output.h"
+#include "spinner.h"
 
 #include <iostream>
+#include <memory>
 
 namespace uniconv::core::output {
 
@@ -23,7 +25,9 @@ public:
 
     void help(std::string_view text) override;
 
-    void progress(std::string_view task, int percent) override;
+    void stage_started(size_t current, size_t total, const std::string& target) override;
+    void stage_completed(size_t current, size_t total, const std::string& target,
+                         int64_t duration_ms, bool success, const std::string& error = "") override;
 
     bool is_verbose() const override;
     bool is_quiet() const override;
@@ -34,6 +38,8 @@ private:
     std::ostream& err_;
     bool verbose_;
     bool quiet_;
+    bool is_tty_;
+    std::unique_ptr<Spinner> spinner_;
 };
 
 } // namespace uniconv::core::output

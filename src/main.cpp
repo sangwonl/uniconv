@@ -171,7 +171,7 @@ int main(int argc, char **argv)
                 }
 
                 core::PipelineExecutor executor(engine);
-                auto result = executor.execute(file_parse_result.pipeline);
+                auto result = executor.execute(file_parse_result.pipeline, output);
 
                 if (result.success)
                 {
@@ -224,7 +224,7 @@ int main(int argc, char **argv)
             }
 
             core::PipelineExecutor executor(engine);
-            auto result = executor.execute(parse_result.pipeline);
+            auto result = executor.execute(parse_result.pipeline, output);
 
             if (args.core_options.json_output)
             {
@@ -238,22 +238,6 @@ int main(int argc, char **argv)
                     output->warning(warning);
                 }
 
-                // Print human-readable output
-                for (const auto &sr : result.stage_results)
-                {
-                    std::string status_msg = "Stage " + std::to_string(sr.stage_index) + ": " + sr.target;
-                    if (sr.status == core::ResultStatus::Success)
-                    {
-                        status_msg += " OK";
-                    }
-                    else
-                    {
-                        status_msg += " FAIL";
-                        if (sr.error)
-                            status_msg += " - " + *sr.error;
-                    }
-                    output->info(status_msg);
-                }
                 if (result.success)
                 {
                     output->success("Pipeline completed successfully");
@@ -261,6 +245,10 @@ int main(int argc, char **argv)
                     {
                         output->info("  -> " + out.string());
                     }
+                }
+                else if (result.error)
+                {
+                    output->error(*result.error);
                 }
             }
             return result.success ? 0 : 1;

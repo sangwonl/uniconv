@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <numeric>
 #include <sstream>
 
 namespace uniconv::core
@@ -17,7 +18,7 @@ namespace uniconv::core
 
     PipelineResult PipelineExecutor::execute(
         const Pipeline &pipeline,
-        const PipelineProgressCallback &progress)
+        const std::shared_ptr<output::IOutput> &output)
     {
         auto start_time = std::chrono::steady_clock::now();
 
@@ -28,8 +29,15 @@ namespace uniconv::core
         ExecutionGraph graph;
         build_graph(graph, pipeline);
 
+        // Count non-builtin nodes for progress reporting
+        size_t total_conversion_nodes = std::accumulate(
+            graph.nodes().begin(), graph.nodes().end(), size_t{0},
+            [](size_t count, const ExecutionNode &n) {
+                return count + (n.is_builtin() ? 0 : 1);
+            });
+
         // Phase 2: Execute all nodes (outputs go to temp)
-        if (!execute_graph(graph, pipeline, progress, final_result))
+        if (!execute_graph(graph, pipeline, output, total_conversion_nodes, final_result))
         {
             cleanup_temp_files();
             return final_result;
@@ -61,16 +69,19 @@ namespace uniconv::core
     bool PipelineExecutor::execute_graph(
         ExecutionGraph &graph,
         const Pipeline &pipeline,
-        const PipelineProgressCallback &progress,
+        const std::shared_ptr<output::IOutput> &output,
+        size_t total_conversion_nodes,
         PipelineResult &result)
     {
         // Get execution order (topological sort)
         auto order = graph.execution_order();
+        size_t current_conversion_node = 0;
 
         for (size_t node_id : order)
         {
             auto &node = graph.node(node_id);
-            if (!execute_node(node, graph, pipeline, progress, result))
+            if (!execute_node(node, graph, pipeline, output,
+                             current_conversion_node, total_conversion_nodes, result))
             {
                 return false;
             }
@@ -83,7 +94,9 @@ namespace uniconv::core
         ExecutionNode &node,
         ExecutionGraph &graph,
         const Pipeline &pipeline,
-        const PipelineProgressCallback &progress,
+        const std::shared_ptr<output::IOutput> &output,
+        size_t &current_conversion_node,
+        size_t total_conversion_nodes,
         PipelineResult &result)
     {
         if (node.is_tee)
@@ -100,7 +113,9 @@ namespace uniconv::core
         }
         else
         {
-            return execute_conversion_node(node, graph, pipeline, progress, result);
+            ++current_conversion_node;
+            return execute_conversion_node(node, graph, pipeline, output,
+                                          current_conversion_node, total_conversion_nodes, result);
         }
     }
 
@@ -217,19 +232,20 @@ namespace uniconv::core
         ExecutionNode &node,
         ExecutionGraph &graph,
         const Pipeline &pipeline,
-        const PipelineProgressCallback &progress,
+        const std::shared_ptr<output::IOutput> &output,
+        size_t current_node,
+        size_t total_nodes,
         PipelineResult &result)
     {
         node.input = get_node_input(node, graph);
 
-        // Progress callback
-        if (progress)
+        // Report progress: stage started
+        if (output)
         {
-            std::ostringstream desc;
-            desc << "Stage " << node.stage_idx << ", Element " << node.element_idx
-                 << ": " << node.target;
-            progress(node.stage_idx, node.element_idx, desc.str());
+            output->stage_started(current_node, total_nodes, node.target);
         }
+
+        auto node_start = std::chrono::steady_clock::now();
 
         // Always output to temp during execution phase
         node.temp_output = generate_temp_path(
@@ -260,11 +276,25 @@ namespace uniconv::core
         // Execute through engine
         auto etl_result = engine_->execute(request);
 
+        auto node_end = std::chrono::steady_clock::now();
+        auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(node_end - node_start).count();
+
         // Use actual output from plugin if available
         std::filesystem::path actual_output = etl_result.output.value_or(node.temp_output);
         node.temp_output = actual_output;
         node.plugin_used = etl_result.plugin_used;
         node.executed = true;
+        node.duration_ms = duration;
+
+        bool success = (etl_result.status == ResultStatus::Success);
+        std::string error_msg = etl_result.error.value_or("");
+
+        // Report progress: stage completed
+        if (output)
+        {
+            output->stage_completed(current_node, total_nodes, node.target,
+                                   duration, success, error_msg);
+        }
 
         // Record stage result
         StageResult stage_result;
@@ -275,12 +305,13 @@ namespace uniconv::core
         stage_result.output = actual_output;
         stage_result.status = etl_result.status;
         stage_result.error = etl_result.error;
+        stage_result.duration_ms = duration;
         result.stage_results.push_back(stage_result);
 
-        if (etl_result.status != ResultStatus::Success)
+        if (!success)
         {
             node.status = ResultStatus::Error;
-            node.error = etl_result.error.value_or("Unknown error");
+            node.error = error_msg.empty() ? "Unknown error" : error_msg;
             result.error = node.error;
             return false;
         }
@@ -703,6 +734,25 @@ namespace uniconv::core
         if (is_known_file_format(node.target))
         {
             return node.target;
+        }
+
+        // Check the actual output file's extension from the plugin.
+        // Extract operations (e.g., "ascii") produce a different format than
+        // the input, and the plugin's output path reflects the real format.
+        if (!node.temp_output.empty())
+        {
+            std::string out_ext = node.temp_output.extension().string();
+            if (!out_ext.empty() && out_ext != ".tmp")
+            {
+                if (out_ext[0] == '.')
+                {
+                    out_ext = out_ext.substr(1);
+                }
+                if (is_known_file_format(out_ext))
+                {
+                    return out_ext;
+                }
+            }
         }
 
         // Otherwise, target is a transformation (e.g., "gray", "resize")

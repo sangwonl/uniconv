@@ -3,16 +3,11 @@
 #include "pipeline.h"
 #include "execution_graph.h"
 #include "engine.h"
+#include "output/output.h"
 #include <memory>
-#include <functional>
 
 namespace uniconv::core
 {
-
-    using PipelineProgressCallback = std::function<void(
-        size_t stage_index,
-        size_t element_index,
-        const std::string &description)>;
 
     class PipelineExecutor
     {
@@ -21,7 +16,7 @@ namespace uniconv::core
 
         // Execute a complete pipeline
         PipelineResult execute(const Pipeline &pipeline,
-                               const PipelineProgressCallback &progress = nullptr);
+                               const std::shared_ptr<output::IOutput> &output = nullptr);
 
     private:
         std::shared_ptr<Engine> engine_;
@@ -33,7 +28,8 @@ namespace uniconv::core
         // Phase 2: Execute all nodes in topological order (all outputs to temp)
         bool execute_graph(ExecutionGraph &graph,
                           const Pipeline &pipeline,
-                          const PipelineProgressCallback &progress,
+                          const std::shared_ptr<output::IOutput> &output,
+                          size_t total_conversion_nodes,
                           PipelineResult &result);
 
         // Phase 3: Finalize outputs (move/keep/delete based on full visibility)
@@ -46,7 +42,9 @@ namespace uniconv::core
         bool execute_node(ExecutionNode &node,
                          ExecutionGraph &graph,
                          const Pipeline &pipeline,
-                         const PipelineProgressCallback &progress,
+                         const std::shared_ptr<output::IOutput> &output,
+                         size_t &current_conversion_node,
+                         size_t total_conversion_nodes,
                          PipelineResult &result);
 
         // Execute tee node (just pass through)
@@ -69,7 +67,9 @@ namespace uniconv::core
         bool execute_conversion_node(ExecutionNode &node,
                                     ExecutionGraph &graph,
                                     const Pipeline &pipeline,
-                                    const PipelineProgressCallback &progress,
+                                    const std::shared_ptr<output::IOutput> &output,
+                                    size_t current_node,
+                                    size_t total_nodes,
                                     PipelineResult &result);
 
         // Generate temp file path for intermediate results
