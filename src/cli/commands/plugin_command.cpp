@@ -367,7 +367,6 @@ namespace uniconv::cli::commands
                         {
                             deps_error += " (see plugin documentation for install instructions)";
                         }
-                        output_->error(deps_error);
                     }
                 }
 
@@ -399,8 +398,7 @@ namespace uniconv::cli::commands
                         if (!install_result.success)
                         {
                             deps_failed = true;
-                            deps_error = install_result.message;
-                            output_->error("Dependency installation failed: " + install_result.message);
+                            deps_error = "Dependency installation failed: " + install_result.message;
                         }
                         else if (!install_result.installed.empty())
                         {
@@ -413,6 +411,7 @@ namespace uniconv::cli::commands
             // If dependency installation failed, rollback
             if (deps_failed)
             {
+                output_->error(deps_error);
                 output_->info("Rolling back plugin installation...");
 
                 // Remove copied plugin directory
@@ -432,7 +431,7 @@ namespace uniconv::cli::commands
                 j["success"] = false;
                 j["plugin"] = manifest->name;
                 j["error"] = deps_error;
-                output_->data(j, "Installation failed: " + deps_error);
+                output_->data(j, "");
 
                 return 1;
             }
@@ -549,7 +548,6 @@ namespace uniconv::cli::commands
                     {
                         deps_error += " (see plugin documentation for install instructions)";
                     }
-                    output_->error(deps_error);
                 }
             }
 
@@ -581,8 +579,7 @@ namespace uniconv::cli::commands
                     if (!install_result.success)
                     {
                         deps_failed = true;
-                        deps_error = install_result.message;
-                        output_->error("Dependency installation failed: " + install_result.message);
+                        deps_error = "Dependency installation failed: " + install_result.message;
                     }
                     else if (!install_result.installed.empty())
                     {
@@ -595,6 +592,7 @@ namespace uniconv::cli::commands
         // If dependency installation failed, rollback
         if (deps_failed)
         {
+            output_->error(deps_error);
             output_->info("Rolling back plugin installation...");
 
             // Remove extracted plugin directory
@@ -614,7 +612,7 @@ namespace uniconv::cli::commands
             j["success"] = false;
             j["plugin"] = name;
             j["error"] = deps_error;
-            output_->data(j, "Installation failed: " + deps_error);
+            output_->data(j, "");
 
             return 1;
         }
