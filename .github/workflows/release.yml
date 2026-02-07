@@ -61,6 +61,7 @@ jobs:
         run: vcpkg install libmagic:x64-windows
 
       - name: Build
+        shell: bash
         run: |
           mkdir build && cd build
           cmake -DCMAKE_BUILD_TYPE=Release \
