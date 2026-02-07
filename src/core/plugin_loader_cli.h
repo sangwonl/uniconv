@@ -2,7 +2,6 @@
 
 #include "plugin_manifest.h"
 #include "plugins/plugin_interface.h"
-#include <chrono>
 #include <filesystem>
 #include <map>
 #include <memory>
@@ -27,15 +26,11 @@ public:
     // Get the manifest
     const PluginManifest& manifest() const { return manifest_; }
 
-    // Set execution timeout (default: 5 minutes)
-    void set_timeout(std::chrono::seconds timeout) { timeout_ = timeout; }
-
     // Set the dependency environment for this plugin
     void set_dep_environment(std::optional<DepEnvironment> env);
 
 private:
     PluginManifest manifest_;
-    std::chrono::seconds timeout_{300};
     std::optional<std::filesystem::path> dep_env_dir_;
 
     // Resolve the full path to the executable
@@ -52,7 +47,6 @@ private:
         int exit_code = -1;
         std::string stdout_output;
         std::string stderr_output;
-        bool timed_out = false;
     };
     ExecuteResult run_process(const std::filesystem::path& executable,
                               const std::vector<std::string>& args,

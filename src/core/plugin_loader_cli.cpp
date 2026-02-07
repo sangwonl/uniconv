@@ -11,7 +11,6 @@
 #else
 #include <sys/wait.h>
 #include <unistd.h>
-#include <signal.h>
 #include <poll.h>
 #endif
 
@@ -29,19 +28,17 @@ namespace uniconv::core
             return s;
         }
 
-// Simple subprocess execution with timeout support
+// Simple subprocess execution
         struct SubprocessResult
         {
             int exit_code = -1;
             std::string stdout_data;
             std::string stderr_data;
-            bool timed_out = false;
         };
 
 #ifndef _WIN32
         SubprocessResult run_subprocess(const std::string &command,
                                         const std::vector<std::string> &args,
-                                        std::chrono::seconds timeout,
                                         const std::map<std::string, std::string> &env = {})
         {
             SubprocessResult result;
@@ -112,27 +109,12 @@ namespace uniconv::core
             fds[1].fd = stderr_pipe[0];
             fds[1].events = POLLIN;
 
-            auto start_time = std::chrono::steady_clock::now();
-            auto timeout_ms = std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count();
-
             std::string stdout_buf, stderr_buf;
             bool done = false;
 
             while (!done)
             {
-                auto elapsed = std::chrono::steady_clock::now() - start_time;
-                auto remaining_ms = timeout_ms - std::chrono::duration_cast<std::chrono::milliseconds>(elapsed).count();
-
-                if (remaining_ms <= 0)
-                {
-                    // Timeout - kill the process
-                    kill(pid, SIGKILL);
-                    result.timed_out = true;
-                    break;
-                }
-
-                int poll_timeout = remaining_ms > 1000 ? 1000 : static_cast<int>(remaining_ms);
-                int poll_result = poll(fds.data(), fds.size(), poll_timeout);
+                int poll_result = poll(fds.data(), fds.size(), 1000);
 
                 if (poll_result < 0)
                 {
@@ -205,7 +187,6 @@ namespace uniconv::core
         // Windows implementation
         SubprocessResult run_subprocess(const std::string &command,
                                         const std::vector<std::string> &args,
-                                        std::chrono::seconds timeout,
                                         const std::map<std::string, std::string> &env = {})
         {
             SubprocessResult result;
@@ -295,14 +276,7 @@ namespace uniconv::core
             CloseHandle(stdout_write);
             CloseHandle(stderr_write);
 
-            auto timeout_ms = static_cast<DWORD>(std::chrono::duration_cast<std::chrono::milliseconds>(timeout).count());
-            DWORD wait_result = WaitForSingleObject(pi.hProcess, timeout_ms);
-
-            if (wait_result == WAIT_TIMEOUT)
-            {
-                TerminateProcess(pi.hProcess, 1);
-                result.timed_out = true;
-            }
+            WaitForSingleObject(pi.hProcess, INFINITE);
 
             // Read output
             char buf[4096];
@@ -565,26 +539,17 @@ namespace uniconv::core
         }
 #endif
 
-        auto subprocess_result = run_subprocess(command, final_args, timeout_, env);
+        auto subprocess_result = run_subprocess(command, final_args, env);
 
         ExecuteResult result;
         result.exit_code = subprocess_result.exit_code;
         result.stdout_output = std::move(subprocess_result.stdout_data);
         result.stderr_output = std::move(subprocess_result.stderr_data);
-        result.timed_out = subprocess_result.timed_out;
         return result;
     }
 
     Result CLIPlugin::parse_result(const Request &request, const ExecuteResult &exec_result) const
     {
-        // Handle timeout
-        if (exec_result.timed_out)
-        {
-            return Result::failure(
-                request.target, request.source,
-                "Plugin execution timed out");
-        }
-
         // Handle non-zero exit code without JSON
         if (exec_result.exit_code != 0 && exec_result.stdout_output.empty())
         {

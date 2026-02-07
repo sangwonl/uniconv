@@ -1,5 +1,6 @@
 #include "console_output.h"
 
+#include <chrono>
 #include <iomanip>
 #include <sstream>
 
@@ -75,13 +76,26 @@ void ConsoleOutput::help(std::string_view text) {
 void ConsoleOutput::stage_started(size_t current, size_t total, const std::string& target) {
     if (quiet_) return;
 
-    std::ostringstream msg;
-    msg << "[" << current << "/" << total << "] Converting to " << target << "...";
+    std::string prefix = "[" + std::to_string(current) + "/" + std::to_string(total) + "] Converting to " + target + "...";
 
     if (is_tty_ && spinner_) {
-        spinner_->start(msg.str());
+        auto start_time = std::chrono::steady_clock::now();
+        spinner_->start([prefix, start_time]() {
+            auto elapsed = std::chrono::steady_clock::now() - start_time;
+            auto secs = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+            if (secs < 3) {
+                return prefix;
+            }
+            std::string suffix;
+            if (secs >= 60) {
+                suffix = " (" + std::to_string(secs / 60) + "m " + std::to_string(secs % 60) + "s)";
+            } else {
+                suffix = " (" + std::to_string(secs) + "s)";
+            }
+            return prefix + suffix;
+        });
     } else {
-        err_ << msg.str() << "\n" << std::flush;
+        err_ << prefix << "\n" << std::flush;
     }
 }
 

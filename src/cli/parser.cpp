@@ -86,6 +86,7 @@ namespace uniconv::cli
         app.add_flag("--quiet", args.core_options.quiet, "Suppress output");
         app.add_flag("--dry-run", args.core_options.dry_run, "Show what would be done");
         app.add_flag("-r,--recursive", args.core_options.recursive, "Process directories recursively");
+        app.add_option("--timeout", args.core_options.timeout_seconds, "Plugin timeout in seconds (0 = no timeout)");
 
         // Interactive mode
         app.add_flag("--interactive", args.interactive, "Force interactive mode");
@@ -252,6 +253,7 @@ namespace uniconv::cli
         watch_cmd->add_flag("--verbose", args.core_options.verbose, "Verbose output");
         watch_cmd->add_flag("--quiet", args.core_options.quiet, "Suppress output");
         watch_cmd->add_flag("--dry-run", args.core_options.dry_run, "Show what would be done");
+        watch_cmd->add_option("--timeout", args.core_options.timeout_seconds, "Plugin timeout in seconds (0 = no timeout)");
         watch_cmd->add_option("directory", args.watch_dir, "Directory to watch")->required()->type_name("DIR");
         watch_cmd->add_option("pipeline", args.pipeline, "Pipeline transformation stages")->required()->type_name("PIPELINE");
         watch_cmd->footer("\nExamples:\n"

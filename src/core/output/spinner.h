@@ -2,6 +2,7 @@
 #define UNICONV_CORE_OUTPUT_SPINNER_H
 
 #include <atomic>
+#include <functional>
 #include <iostream>
 #include <string>
 #include <thread>
@@ -18,8 +19,12 @@ public:
     Spinner& operator=(const Spinner&) = delete;
 
     void start(const std::string& message) {
+        start([message]() { return message; });
+    }
+
+    void start(std::function<std::string()> message_fn) {
         stop();
-        message_ = message;
+        message_fn_ = std::move(message_fn);
         running_.store(true);
         thread_ = std::thread([this]() {
             static const char* frames[] = {
@@ -29,7 +34,7 @@ public:
             };
             size_t i = 0;
             while (running_.load()) {
-                os_ << "\r" << frames[i % 10] << " " << message_ << std::flush;
+                os_ << "\r\033[K" << frames[i % 10] << " " << message_fn_() << std::flush;
                 i++;
                 std::this_thread::sleep_for(std::chrono::milliseconds(80));
             }
@@ -48,7 +53,7 @@ public:
 
 private:
     std::ostream& os_;
-    std::string message_;
+    std::function<std::string()> message_fn_;
     std::atomic<bool> running_{false};
     std::thread thread_;
 };

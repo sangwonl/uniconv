@@ -1,6 +1,9 @@
 #include "engine.h"
 #include "utils/file_utils.h"
 #include <algorithm>
+#include <chrono>
+#include <future>
+#include <thread>
 
 namespace uniconv::core
 {
@@ -102,8 +105,35 @@ namespace uniconv::core
         Request resolved_request = request;
         resolved_request.core_options.output = output_path;
 
-        // Execute plugin
-        auto result = plugin->execute(resolved_request);
+        // Execute plugin (with optional timeout)
+        Result result;
+        if (resolved_request.core_options.timeout_seconds > 0)
+        {
+            std::packaged_task<Result()> task([&]() {
+                return plugin->execute(resolved_request);
+            });
+            auto future = task.get_future();
+            std::thread worker(std::move(task));
+
+            auto timeout = std::chrono::seconds(resolved_request.core_options.timeout_seconds);
+            if (future.wait_for(timeout) == std::future_status::timeout)
+            {
+                worker.detach();
+                result = Result::failure(
+                    request.target, request.source,
+                    "Plugin execution timed out");
+            }
+            else
+            {
+                worker.join();
+                result = future.get();
+            }
+        }
+        else
+        {
+            result = plugin->execute(resolved_request);
+        }
+
         result.plugin_used = plugin->info().scope;
         result.input_size = input_size;
 

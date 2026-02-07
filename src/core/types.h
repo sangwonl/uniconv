@@ -163,6 +163,7 @@ namespace uniconv::core
         bool quiet = false;       // Suppress output
         bool dry_run = false;     // Don't actually execute
         bool recursive = false;   // Process directories recursively
+        int timeout_seconds = 0;  // Plugin timeout (0 = no timeout)
 
         nlohmann::json to_json() const
         {
@@ -175,6 +176,8 @@ namespace uniconv::core
             j["quiet"] = quiet;
             j["dry_run"] = dry_run;
             j["recursive"] = recursive;
+            if (timeout_seconds > 0)
+                j["timeout_seconds"] = timeout_seconds;
             return j;
         }
     };
@@ -372,6 +375,7 @@ namespace uniconv::core
                 p.core_options.quiet = co.value("quiet", false);
                 p.core_options.dry_run = co.value("dry_run", false);
                 p.core_options.recursive = co.value("recursive", false);
+                p.core_options.timeout_seconds = co.value("timeout_seconds", 0);
             }
 
             if (j.contains("plugin_options"))
