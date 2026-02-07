@@ -41,12 +41,20 @@ jobs:
         if: matrix.platform == 'linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake build-essential
+          sudo apt-get install -y cmake build-essential libmagic-dev
+
+      - name: Install dependencies (macOS)
+        if: matrix.platform == 'darwin'
+        run: brew install libmagic
+
+      - name: Install dependencies (Windows)
+        if: matrix.platform == 'windows'
+        run: vcpkg install libmagic:x64-windows
 
       - name: Build
         run: |
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }} ..
+          cmake -DCMAKE_BUILD_TYPE=Release ${{ matrix.cmake_flags }} ${{ matrix.platform == 'windows' && format('-DCMAKE_TOOLCHAIN_FILE={0}/scripts/buildsystems/vcpkg.cmake', env.VCPKG_INSTALLATION_ROOT) || '' }} ..
           cmake --build . --config Release
 
       - name: Package (Unix)

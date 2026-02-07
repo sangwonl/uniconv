@@ -119,14 +119,38 @@ target_include_directories(uniconv PRIVATE
 )
 
 find_package(Threads REQUIRED)
-find_package(PkgConfig REQUIRED)
-pkg_check_modules(LIBMAGIC REQUIRED IMPORTED_TARGET libmagic)
+
+# libmagic — try pkg-config first (Linux/macOS), then find_library (Windows)
+find_package(PkgConfig QUIET)
+if(PkgConfig_FOUND)
+    pkg_check_modules(LIBMAGIC IMPORTED_TARGET libmagic)
+endif()
+
+if(NOT LIBMAGIC_FOUND)
+    find_path(LIBMAGIC_INCLUDE_DIR magic.h)
+    find_library(LIBMAGIC_LIBRARY NAMES magic)
+    if(LIBMAGIC_INCLUDE_DIR AND LIBMAGIC_LIBRARY)
+        set(LIBMAGIC_FOUND TRUE)
+        add_library(LibMagic::LibMagic IMPORTED INTERFACE)
+        target_include_directories(LibMagic::LibMagic INTERFACE ${LIBMAGIC_INCLUDE_DIR})
+        target_link_libraries(LibMagic::LibMagic INTERFACE ${LIBMAGIC_LIBRARY})
+    endif()
+endif()
+
+if(NOT LIBMAGIC_FOUND)
+    message(FATAL_ERROR
+        "libmagic not found.\n"
+        "  macOS:   brew install libmagic\n"
+        "  Ubuntu:  sudo apt install libmagic-dev\n"
+        "  Windows: vcpkg install libmagic")
+endif()
 
 target_link_libraries(uniconv PRIVATE
     CLI11::CLI11
     nlohmann_json::nlohmann_json
     Threads::Threads
-    PkgConfig::LIBMAGIC
+    $<TARGET_NAME_IF_EXISTS:PkgConfig::LIBMAGIC>
+    $<TARGET_NAME_IF_EXISTS:LibMagic::LibMagic>
 )
 
 if(UNICONV_ENABLE_WARNINGS)
