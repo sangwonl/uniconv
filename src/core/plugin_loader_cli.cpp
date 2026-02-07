@@ -406,15 +406,11 @@ namespace uniconv::core
             args.push_back("--dry-run");
         }
 
-        // Plugin-specific options (declared in manifest, passed after --)
+        // Plugin-specific options (declared in manifest)
         // This includes domain-specific options like --quality, --width for image plugins
-        if (!request.plugin_options.empty())
+        for (const auto &opt : request.plugin_options)
         {
-            args.push_back("--");
-            for (const auto &opt : request.plugin_options)
-            {
-                args.push_back(opt);
-            }
+            args.push_back(opt);
         }
 
         return args;
