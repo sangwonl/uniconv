@@ -63,12 +63,15 @@ jobs:
       - name: Build
         shell: bash
         run: |
+          CMAKE_EXTRA="${{ matrix.cmake_flags }}"
+          if [ "${{ matrix.platform }}" = "darwin" ]; then
+            CMAKE_EXTRA="$CMAKE_EXTRA -DCMAKE_PREFIX_PATH=${{ github.workspace }}/libmagic-install"
+          fi
+          if [ "${{ matrix.platform }}" = "windows" ]; then
+            CMAKE_EXTRA="$CMAKE_EXTRA -DCMAKE_TOOLCHAIN_FILE=$VCPKG_INSTALLATION_ROOT/scripts/buildsystems/vcpkg.cmake"
+          fi
           mkdir build && cd build
-          cmake -DCMAKE_BUILD_TYPE=Release \
-            ${{ matrix.cmake_flags }} \
-            ${{ matrix.platform == 'darwin' && format('-DCMAKE_PREFIX_PATH={0}/libmagic-install', github.workspace) || '' }} \
-            ${{ matrix.platform == 'windows' && format('-DCMAKE_TOOLCHAIN_FILE={0}/scripts/buildsystems/vcpkg.cmake', env.VCPKG_INSTALLATION_ROOT) || '' }} \
-            ..
+          cmake -DCMAKE_BUILD_TYPE=Release $CMAKE_EXTRA ..
           cmake --build . --config Release
 
       - name: Package (Unix)
