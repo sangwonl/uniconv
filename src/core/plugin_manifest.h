@@ -184,6 +184,21 @@ namespace uniconv::core
                 }
             }
 
+            if (!input_types.empty())
+            {
+                std::vector<std::string> input_strs;
+                for (auto t : input_types)
+                    input_strs.push_back(data_type_to_string(t));
+                j["input_types"] = input_strs;
+            }
+            if (!output_types.empty())
+            {
+                std::vector<std::string> output_strs;
+                for (auto t : output_types)
+                    output_strs.push_back(data_type_to_string(t));
+                j["output_types"] = output_strs;
+            }
+
             return j;
         }
 
@@ -238,6 +253,7 @@ namespace uniconv::core
         PluginInfo to_plugin_info() const
         {
             PluginInfo info;
+            info.name = name;
             info.id = id();
             info.scope = scope;
             info.targets = targets;

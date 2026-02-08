@@ -299,6 +299,7 @@ namespace uniconv::core
     // Plugin information
     struct PluginInfo
     {
+        std::string name;                       // Plugin name: "image-convert"
         std::string id;                         // Full ID: "image-core"
         std::string scope;                      // Plugin scope: "image-core"
         std::vector<std::string> targets;       // Supported targets
@@ -314,6 +315,7 @@ namespace uniconv::core
         nlohmann::json to_json() const
         {
             auto j = nlohmann::json{
+                {"name", name},
                 {"id", id},
                 {"scope", scope},
                 {"targets", targets},

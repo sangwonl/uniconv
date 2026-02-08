@@ -17,6 +17,7 @@ enum class Command {
     Plugin,        // uniconv plugin <subcommand>
     Config,        // uniconv config <subcommand>
     Watch,         // uniconv watch <dir> <pipeline>
+    Detect,        // uniconv detect <file>
     Interactive,   // No command, enter interactive mode
     Help,          // Show help
     Version,       // Show version

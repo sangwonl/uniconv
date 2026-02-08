@@ -78,6 +78,7 @@ namespace uniconv::cli::commands
         for (const auto &p : builtin)
         {
             auto pj = p.to_json();
+            pj["interface"] = "built-in";
             pj["source"] = "built-in";
             j.push_back(pj);
         }
@@ -774,6 +775,7 @@ namespace uniconv::cli::commands
             if (p.id == name || p.scope == name)
             {
                 auto j = p.to_json();
+                j["interface"] = "built-in";
                 j["source"] = "built-in";
 
                 std::ostringstream text;
@@ -821,6 +823,7 @@ namespace uniconv::cli::commands
         std::string source = installed_.is_registry_installed(manifest->name) ? "registry" : "local";
 
         auto j = manifest->to_json();
+        j["builtin"] = false;
         j["path"] = plugin_dir->string();
         j["source"] = source;
 

@@ -86,6 +86,8 @@ add_executable(uniconv
     src/cli/commands/plugin_command.cpp
     src/cli/commands/config_command.h
     src/cli/commands/config_command.cpp
+    src/cli/commands/detect_command.h
+    src/cli/commands/detect_command.cpp
     src/cli/commands/update_command.h
     src/cli/commands/update_command.cpp
     src/utils/file_utils.h

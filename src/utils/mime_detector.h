@@ -15,6 +15,10 @@ public:
     MimeDetector(const MimeDetector&) = delete;
     MimeDetector& operator=(const MimeDetector&) = delete;
 
+    // Detect MIME type from buffer content (e.g., "image/png", "text/plain")
+    // Returns empty string if detection fails
+    std::string detect_mime(const void* data, std::size_t size) const;
+
     // Detect file extension from buffer content (e.g., "png", "json", "txt")
     // Returns "dat" if format cannot be determined
     std::string detect_extension(const void* data, std::size_t size) const;

@@ -81,6 +81,18 @@ MimeDetector::~MimeDetector()
         magic_close(cookie_);
 }
 
+std::string MimeDetector::detect_mime(const void *data, std::size_t size) const
+{
+    if (!cookie_ || !data || size == 0)
+        return "";
+
+    const char *mime = magic_buffer(cookie_, data, size);
+    if (!mime)
+        return "";
+
+    return std::string(mime);
+}
+
 std::string MimeDetector::detect_extension(const void *data, std::size_t size) const
 {
     if (!cookie_ || !data || size == 0)

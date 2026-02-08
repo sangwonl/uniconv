@@ -124,31 +124,46 @@ namespace uniconv::cli
     {
         // Info command
         auto *info_cmd = app.add_subcommand("info", "Show file information");
+        info_cmd->fallthrough();
         info_cmd->add_option("file", args.subcommand_args, "File to analyze")->required();
         info_cmd->footer("\nExamples:\n"
                          "  uniconv info photo.jpg\n"
-                         "  uniconv --json info photo.jpg  # JSON output");
+                         "  uniconv info photo.jpg --json   # JSON output");
         info_cmd->callback([&args]()
                            { args.command = Command::Info; });
 
+        // Detect command
+        auto *detect_cmd = app.add_subcommand("detect", "Detect file type from content (using libmagic)");
+        detect_cmd->fallthrough();
+        detect_cmd->add_option("file", args.subcommand_args, "File to detect")->required();
+        detect_cmd->footer("\nExamples:\n"
+                           "  uniconv detect photo.jpg\n"
+                           "  uniconv detect photo.jpg --json  # JSON output");
+        detect_cmd->callback([&args]()
+                             { args.command = Command::Detect; });
+
         // Formats command (hidden — not yet implemented)
         auto *formats_cmd = app.add_subcommand("formats", "List supported formats");
+        formats_cmd->fallthrough();
         formats_cmd->group("");
         formats_cmd->callback([&args]()
                               { args.command = Command::Formats; });
 
         // Preset command (hidden — not yet implemented)
         auto *preset_cmd = app.add_subcommand("preset", "Manage presets");
+        preset_cmd->fallthrough();
         preset_cmd->group("");
         preset_cmd->require_subcommand(1);
 
         auto *preset_list = preset_cmd->add_subcommand("list", "List all presets");
+        preset_list->fallthrough();
         preset_list->callback([&args]()
                               {
         args.command = Command::Preset;
         args.subcommand_args.insert(args.subcommand_args.begin(), "list"); });
 
         auto *preset_create = preset_cmd->add_subcommand("create", "Create a preset");
+        preset_create->fallthrough();
         preset_create->add_option("name", args.subcommand, "Preset name")->required();
         preset_create->callback([&args]()
                                 {
@@ -156,6 +171,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "create"); });
 
         auto *preset_delete = preset_cmd->add_subcommand("delete", "Delete a preset");
+        preset_delete->fallthrough();
         preset_delete->add_option("name", args.subcommand, "Preset name")->required();
         preset_delete->callback([&args]()
                                 {
@@ -163,6 +179,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "delete"); });
 
         auto *preset_show = preset_cmd->add_subcommand("show", "Show preset details");
+        preset_show->fallthrough();
         preset_show->add_option("name", args.subcommand, "Preset name")->required();
         preset_show->callback([&args]()
                               {
@@ -170,6 +187,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "show"); });
 
         auto *preset_export = preset_cmd->add_subcommand("export", "Export preset to file");
+        preset_export->fallthrough();
         preset_export->add_option("name", args.subcommand, "Preset name")->required();
         preset_export->add_option("file", args.subcommand_args, "Output file")->required();
         preset_export->callback([&args]()
@@ -178,6 +196,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "export"); });
 
         auto *preset_import = preset_cmd->add_subcommand("import", "Import preset from file");
+        preset_import->fallthrough();
         preset_import->add_option("file", args.subcommand_args, "Input file")->required();
         preset_import->callback([&args]()
                                 {
@@ -186,6 +205,7 @@ namespace uniconv::cli
 
         // Plugin command (manage)
         auto *plugin_cmd = app.add_subcommand("plugin", "Manage plugins");
+        plugin_cmd->fallthrough();
         plugin_cmd->require_subcommand(1);
         plugin_cmd->footer("\nExamples:\n"
                            "  uniconv plugin list              # List installed plugins\n"
@@ -193,6 +213,7 @@ namespace uniconv::cli
                            "  uniconv plugin remove image-convert   # Remove a plugin");
 
         auto *plugin_list = plugin_cmd->add_subcommand("list", "List installed plugins");
+        plugin_list->fallthrough();
         plugin_list->add_flag("--registry", args.list_registry, "List all plugins available in the registry");
         plugin_list->footer("\nExamples:\n"
                             "  uniconv plugin list              # List installed plugins\n"
@@ -203,6 +224,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "list"); });
 
         auto *plugin_install = plugin_cmd->add_subcommand("install", "Install a plugin");
+        plugin_install->fallthrough();
         plugin_install->add_option("source", args.subcommand_args, "Plugin name[@version] or local path")->required();
         plugin_install->footer("\nExamples:\n"
                                "  uniconv plugin install image-convert        # Install from registry\n"
@@ -215,6 +237,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "install"); });
 
         auto *plugin_remove = plugin_cmd->add_subcommand("remove", "Remove a plugin");
+        plugin_remove->fallthrough();
         plugin_remove->add_option("name", args.subcommand, "Plugin name")->required();
         plugin_remove->footer("\nExamples:\n"
                               "  uniconv plugin remove image-convert");
@@ -224,6 +247,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "remove"); });
 
         auto *plugin_info = plugin_cmd->add_subcommand("info", "Show plugin information");
+        plugin_info->fallthrough();
         plugin_info->add_option("name", args.subcommand, "Plugin name")->required();
         plugin_info->footer("\nExamples:\n"
                             "  uniconv plugin info image-convert");
@@ -233,6 +257,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "info"); });
 
         auto *plugin_search = plugin_cmd->add_subcommand("search", "Search plugin registry");
+        plugin_search->fallthrough();
         plugin_search->add_option("query", args.subcommand, "Search query")->required();
         plugin_search->footer("\nExamples:\n"
                               "  uniconv plugin search image\n"
@@ -243,6 +268,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "search"); });
 
         auto *plugin_update = plugin_cmd->add_subcommand("update", "Update plugin(s)");
+        plugin_update->fallthrough();
         plugin_update->add_option("name", args.subcommand, "Plugin name, +collection, or omit for all");
         plugin_update->footer("\nExamples:\n"
                               "  uniconv plugin update                # Update all plugins\n"
@@ -255,6 +281,7 @@ namespace uniconv::cli
 
         // Update command (self-update)
         auto *update_cmd = app.add_subcommand("update", "Update uniconv to latest version");
+        update_cmd->fallthrough();
         update_cmd->add_flag("--check", args.update_check_only, "Only check for updates, don't install");
         update_cmd->footer("\nExamples:\n"
                            "  uniconv update          # Update to latest version\n"
@@ -264,14 +291,7 @@ namespace uniconv::cli
 
         // Watch command
         auto *watch_cmd = app.add_subcommand("watch", "Watch directory for changes and process new files");
-        watch_cmd->add_option("-o,--output", args.core_options.output, "Output directory");
-        watch_cmd->add_flag("-f,--force", args.core_options.force, "Overwrite existing files");
-        watch_cmd->add_flag("-r,--recursive", args.core_options.recursive, "Watch directories recursively");
-        watch_cmd->add_flag("--json", args.core_options.json_output, "Output as JSON");
-        watch_cmd->add_flag("--verbose", args.core_options.verbose, "Verbose output");
-        watch_cmd->add_flag("--quiet", args.core_options.quiet, "Suppress output");
-        watch_cmd->add_flag("--dry-run", args.core_options.dry_run, "Show what would be done");
-        watch_cmd->add_option("--timeout", args.core_options.timeout_seconds, "Plugin timeout in seconds (0 = no timeout)");
+        watch_cmd->fallthrough();
         watch_cmd->add_option("directory", args.watch_dir, "Directory to watch")->required()->type_name("DIR");
         watch_cmd->add_option("pipeline", args.pipeline, "Pipeline transformation stages")->required()->type_name("PIPELINE");
         watch_cmd->footer("\nExamples:\n"
@@ -284,10 +304,12 @@ namespace uniconv::cli
 
         // Config command (hidden — not yet implemented)
         auto *config_cmd = app.add_subcommand("config", "Manage configuration");
+        config_cmd->fallthrough();
         config_cmd->group("");
         config_cmd->require_subcommand(1);
 
         auto *config_get = config_cmd->add_subcommand("get", "Get config value");
+        config_get->fallthrough();
         config_get->add_option("key", args.subcommand, "Config key")->required();
         config_get->callback([&args]()
                              {
@@ -295,6 +317,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "get"); });
 
         auto *config_set = config_cmd->add_subcommand("set", "Set config value");
+        config_set->fallthrough();
         config_set->add_option("key", args.subcommand, "Config key")->required();
         config_set->add_option("value", args.subcommand_args, "Config value")->required();
         config_set->callback([&args]()
@@ -303,6 +326,7 @@ namespace uniconv::cli
         args.subcommand_args.insert(args.subcommand_args.begin(), "set"); });
 
         auto *config_list = config_cmd->add_subcommand("list", "List all config");
+        config_list->fallthrough();
         config_list->callback([&args]()
                               {
         args.command = Command::Config;

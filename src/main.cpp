@@ -5,6 +5,7 @@
 #include "cli/commands/plugin_command.h"
 #include "cli/commands/config_command.h"
 #include "cli/commands/update_command.h"
+#include "cli/commands/detect_command.h"
 #include "cli/pipeline_parser.h"
 #include "core/engine.h"
 #include "core/preset_manager.h"
@@ -144,6 +145,12 @@ int main(int argc, char **argv)
         case cli::Command::Update:
         {
             cli::commands::UpdateCommand cmd(output);
+            return cmd.execute(args);
+        }
+
+        case cli::Command::Detect:
+        {
+            cli::commands::DetectCommand cmd(output);
             return cmd.execute(args);
         }
 
