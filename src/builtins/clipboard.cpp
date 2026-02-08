@@ -9,6 +9,15 @@
 #include <sstream>
 #include <unordered_set>
 
+// Windows uses _popen/_pclose instead of popen/pclose
+#ifdef _WIN32
+#define POPEN _popen
+#define PCLOSE _pclose
+#else
+#define POPEN popen
+#define PCLOSE pclose
+#endif
+
 namespace uniconv::builtins {
 
 namespace {
@@ -21,7 +30,7 @@ int execute_command(const std::string& cmd) {
 // Execute a command and capture binary output (safe for null bytes)
 std::string capture_command(const std::string& cmd, int& exit_status) {
     std::string output;
-    FILE* pipe = popen(cmd.c_str(), "r");
+    FILE* pipe = POPEN(cmd.c_str(), "r");
     if (!pipe) {
         exit_status = -1;
         return {};
@@ -32,7 +41,7 @@ std::string capture_command(const std::string& cmd, int& exit_status) {
         if (n == 0) break;
         output.append(buf, n);
     }
-    exit_status = pclose(pipe);
+    exit_status = PCLOSE(pipe);
     return output;
 }
 
