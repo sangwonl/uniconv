@@ -52,6 +52,32 @@ void ExecutionGraph::build_from_pipeline(const Pipeline& pipeline) {
             continue;
         }
 
+        // Handle collect - gathers N inputs into 1
+        if (stage.has_collect()) {
+            size_t collect_id = add_node();
+            auto& collect_node = nodes_[collect_id];
+            collect_node.stage_idx = stage_idx;
+            collect_node.element_idx = 0;
+            collect_node.target = "collect";
+            collect_node.is_collect = true;
+            collect_node.options = stage.elements[0].options;
+            collect_node.plugin_options = stage.elements[0].raw_options;
+
+            // Connect all previous outputs as inputs
+            if (prev_stage_outputs.empty()) {
+                collect_node.input = source_;
+            } else {
+                collect_node.input_nodes = prev_stage_outputs;
+                for (size_t prev_id : prev_stage_outputs) {
+                    nodes_[prev_id].output_nodes.push_back(collect_id);
+                }
+            }
+
+            current_stage_outputs.push_back(collect_id);
+            prev_stage_outputs = current_stage_outputs;
+            continue;
+        }
+
         // Regular conversion elements (including builtins like clipboard, passthrough)
         for (size_t elem_idx = 0; elem_idx < stage.elements.size(); ++elem_idx) {
             const auto& element = stage.elements[elem_idx];

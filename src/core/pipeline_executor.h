@@ -22,6 +22,15 @@ namespace uniconv::core
         std::shared_ptr<Engine> engine_;
         std::filesystem::path temp_dir_;
 
+        // Scatter/collect pipeline width tracking
+        // When a plugin returns "outputs" (scatter), width increases from 1 to N.
+        // Subsequent stages execute N times (once per scattered output).
+        // "collect" reduces width back to 1.
+        size_t pipeline_width_ = 1;
+
+        // When width > 1, these track the parallel file paths at current width
+        std::vector<std::filesystem::path> scattered_paths_;
+
         // Phase 1: Build execution graph from pipeline
         void build_graph(ExecutionGraph &graph, const Pipeline &pipeline);
 
@@ -52,6 +61,11 @@ namespace uniconv::core
                              ExecutionGraph &graph,
                              PipelineResult &result);
 
+        // Execute collect node (N→1 fan-in)
+        bool execute_collect_node(ExecutionNode &node,
+                                 ExecutionGraph &graph,
+                                 PipelineResult &result);
+
         // Execute clipboard node
         bool execute_clipboard_node(ExecutionNode &node,
                                    ExecutionGraph &graph,
@@ -72,11 +86,27 @@ namespace uniconv::core
                                     size_t total_nodes,
                                     PipelineResult &result);
 
+        // Execute a conversion for each scattered input (N→N parallel transform)
+        bool execute_scattered_conversion(ExecutionNode &node,
+                                         ExecutionGraph &graph,
+                                         const Pipeline &pipeline,
+                                         const std::shared_ptr<output::IOutput> &output,
+                                         size_t current_node,
+                                         size_t total_nodes,
+                                         PipelineResult &result);
+
         // Generate temp file path: run_dir / s{N}_e{M}.{target}
         std::filesystem::path generate_temp_path(
             const std::string &target,
             size_t stage_index,
             size_t element_index);
+
+        // Generate temp file path for scatter index: run_dir / s{N}_e{M}_i{I}.{target}
+        std::filesystem::path generate_scatter_temp_path(
+            const std::string &target,
+            size_t stage_index,
+            size_t element_index,
+            size_t scatter_index);
 
         // Generate final output path (current directory)
         std::filesystem::path generate_final_output_path(

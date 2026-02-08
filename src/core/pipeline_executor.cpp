@@ -1,8 +1,10 @@
 #include "pipeline_executor.h"
 #include "builtins/clipboard.h"
+#include "builtins/collect.h"
 #include <algorithm>
 #include <cctype>
 #include <chrono>
+#include <iomanip>
 #include <numeric>
 #include <sstream>
 
@@ -115,6 +117,10 @@ namespace uniconv::core
         {
             return execute_tee_node(node, graph, result);
         }
+        else if (node.is_collect)
+        {
+            return execute_collect_node(node, graph, result);
+        }
         else if (node.is_clipboard)
         {
             return execute_clipboard_node(node, graph, pipeline, result);
@@ -126,6 +132,15 @@ namespace uniconv::core
         else
         {
             ++current_conversion_node;
+
+            // If pipeline width > 1 (we're in a scattered context),
+            // execute this node once per scattered input
+            if (pipeline_width_ > 1 && !scattered_paths_.empty())
+            {
+                return execute_scattered_conversion(node, graph, pipeline, output,
+                                                   current_conversion_node, total_conversion_nodes, result);
+            }
+
             return execute_conversion_node(node, graph, pipeline, output,
                                           current_conversion_node, total_conversion_nodes, result);
         }
@@ -149,6 +164,77 @@ namespace uniconv::core
         stage_result.plugin_used = "builtin:tee";
         stage_result.input = node.input;
         stage_result.output = node.temp_output;
+        stage_result.status = ResultStatus::Success;
+        stage_result.duration_ms = 0;
+        result.stage_results.push_back(stage_result);
+
+        return true;
+    }
+
+    bool PipelineExecutor::execute_collect_node(
+        ExecutionNode &node,
+        ExecutionGraph &graph,
+        PipelineResult &result)
+    {
+        // Collect gathers all scattered paths into a temp directory
+        // The scattered_paths_ vector holds the current N parallel file paths
+
+        if (scattered_paths_.empty())
+        {
+            // Fall back to collecting from input nodes
+            for (size_t pred_id : node.input_nodes)
+            {
+                const auto &pred = graph.node(pred_id);
+                if (!pred.scatter_outputs.empty())
+                {
+                    scattered_paths_ = pred.scatter_outputs;
+                    break;
+                }
+                else if (!pred.temp_output.empty())
+                {
+                    scattered_paths_.push_back(pred.temp_output);
+                }
+            }
+        }
+
+        if (scattered_paths_.empty())
+        {
+            node.status = ResultStatus::Error;
+            node.error = "Collect has no inputs to gather";
+            result.error = node.error;
+            return false;
+        }
+
+        node.collect_inputs = scattered_paths_;
+
+        // Execute the collect builtin
+        auto collect_result = builtins::Collect::execute(scattered_paths_, temp_dir_);
+
+        if (!collect_result.success)
+        {
+            node.status = ResultStatus::Error;
+            node.error = collect_result.error;
+            result.error = collect_result.error;
+            return false;
+        }
+
+        node.input = scattered_paths_[0]; // Representative input for logging
+        node.temp_output = collect_result.output_dir;
+        node.executed = true;
+        node.status = ResultStatus::Success;
+        node.plugin_used = "builtin:collect";
+
+        // Reset pipeline width back to 1
+        pipeline_width_ = 1;
+        scattered_paths_.clear();
+
+        // Record stage result
+        StageResult stage_result;
+        stage_result.stage_index = node.stage_idx;
+        stage_result.target = "collect";
+        stage_result.plugin_used = "builtin:collect";
+        stage_result.input = node.input;
+        stage_result.output = collect_result.output_dir;
         stage_result.status = ResultStatus::Success;
         stage_result.duration_ms = 0;
         result.stage_results.push_back(stage_result);
@@ -328,6 +414,123 @@ namespace uniconv::core
             return false;
         }
 
+        // Detect scatter result: plugin returned "outputs" array (1→N)
+        if (etl_result.is_scatter())
+        {
+            node.scatter_outputs = etl_result.outputs;
+            scattered_paths_ = etl_result.outputs;
+            pipeline_width_ = etl_result.outputs.size();
+        }
+
+        node.status = ResultStatus::Success;
+        return true;
+    }
+
+    bool PipelineExecutor::execute_scattered_conversion(
+        ExecutionNode &node,
+        [[maybe_unused]] ExecutionGraph &graph,
+        const Pipeline &pipeline,
+        const std::shared_ptr<output::IOutput> &output,
+        size_t current_node,
+        size_t total_nodes,
+        PipelineResult &result)
+    {
+        // Execute the conversion once for each scattered input
+        std::vector<std::filesystem::path> new_scattered_paths;
+        new_scattered_paths.reserve(scattered_paths_.size());
+
+        for (size_t i = 0; i < scattered_paths_.size(); ++i)
+        {
+            const auto &scattered_input = scattered_paths_[i];
+
+            // Report progress
+            if (output)
+            {
+                output->stage_started(current_node, total_nodes,
+                                     node.target + " [" + std::to_string(i + 1) + "/" +
+                                     std::to_string(scattered_paths_.size()) + "]");
+            }
+
+            auto scatter_start = std::chrono::steady_clock::now();
+
+            // Generate a unique temp path for this scatter index
+            auto temp_output = generate_scatter_temp_path(
+                node.target, node.stage_idx, node.element_idx, i);
+
+            // Build request
+            Request request;
+            request.source = scattered_input;
+            request.target = node.target;
+            request.plugin = node.plugin;
+            request.core_options = pipeline.core_options;
+            request.core_options.output = temp_output;
+            request.plugin_options = node.plugin_options;
+
+            // Format hint for temp files
+            if (is_temp_path(scattered_input))
+            {
+                std::string ext = scattered_input.extension().string();
+                if (!ext.empty() && ext[0] == '.')
+                    ext = ext.substr(1);
+                if (!ext.empty())
+                    request.input_format = ext;
+            }
+
+            // Execute through engine
+            auto etl_result = engine_->execute(request);
+
+            auto scatter_end = std::chrono::steady_clock::now();
+            auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                scatter_end - scatter_start).count();
+
+            std::filesystem::path actual_output = etl_result.output.value_or(temp_output);
+
+            bool success = (etl_result.status == ResultStatus::Success);
+            std::string error_msg = etl_result.error.value_or("");
+
+            if (output)
+            {
+                output->stage_completed(current_node, total_nodes,
+                                       node.target + " [" + std::to_string(i + 1) + "/" +
+                                       std::to_string(scattered_paths_.size()) + "]",
+                                       duration, success, error_msg);
+            }
+
+            // Record stage result for each scatter execution
+            StageResult stage_result;
+            stage_result.stage_index = node.stage_idx;
+            stage_result.target = node.target;
+            stage_result.plugin_used = etl_result.plugin_used;
+            stage_result.input = scattered_input;
+            stage_result.output = actual_output;
+            stage_result.status = etl_result.status;
+            stage_result.error = etl_result.error;
+            stage_result.duration_ms = duration;
+            result.stage_results.push_back(stage_result);
+
+            if (!success)
+            {
+                node.status = ResultStatus::Error;
+                node.error = error_msg.empty() ? "Unknown error" : error_msg;
+                result.error = node.error;
+                return false;
+            }
+
+            new_scattered_paths.push_back(actual_output);
+        }
+
+        // Update scattered paths for next stage
+        scattered_paths_ = new_scattered_paths;
+        node.scatter_outputs = new_scattered_paths;
+
+        // Use the first output as the node's temp_output for graph connectivity
+        if (!new_scattered_paths.empty())
+        {
+            node.temp_output = new_scattered_paths[0];
+        }
+
+        node.plugin_used = ""; // Multiple executions, no single plugin
+        node.executed = true;
         node.status = ResultStatus::Success;
         return true;
     }
@@ -365,15 +568,10 @@ namespace uniconv::core
             {
                 if (content_was_copied)
                 {
-                    // Content-copyable format (image/text)
-                    // Default: no file (clipboard has content)
-                    // With -o or --save: create file
                     should_create_file = has_output_option || clipboard_has_save;
                 }
                 else
                 {
-                    // Non-content-copyable format (video/binary)
-                    // Must have -o or --save to specify where to save
                     if (!has_output_option && !clipboard_has_save)
                     {
                         std::string output_format = get_output_format(node, graph);
@@ -388,11 +586,99 @@ namespace uniconv::core
 
             if (!should_create_file)
             {
-                // Don't create file - temp will be cleaned up
                 continue;
             }
 
-            // Determine final output path
+            // Handle scattered terminal node (N final outputs)
+            if (is_terminal && !node.scatter_outputs.empty())
+            {
+                // This node produced multiple outputs via scatter or scattered execution.
+                // Each scattered output becomes a final output.
+                std::string output_format = get_output_format(node, graph);
+                std::string transform = is_known_file_format(node.target) ? "" : node.target;
+
+                // Determine output directory
+                std::filesystem::path output_dir;
+                if (pipeline.core_options.output.has_value())
+                {
+                    output_dir = *pipeline.core_options.output;
+                    // If -o is a directory (or ends with /), use it
+                    // Otherwise, use the parent directory
+                    std::string path_str = output_dir.string();
+                    if (!path_str.empty() && (path_str.back() == '/' || path_str.back() == '\\'))
+                    {
+                        // Already a directory path
+                    }
+                    else if (std::filesystem::is_directory(output_dir))
+                    {
+                        // Existing directory
+                    }
+                    else
+                    {
+                        // -o specifies a file path; for scatter, use its parent
+                        output_dir = output_dir.parent_path();
+                        if (output_dir.empty())
+                            output_dir = std::filesystem::current_path();
+                    }
+                }
+                else
+                {
+                    output_dir = std::filesystem::current_path();
+                }
+
+                std::filesystem::create_directories(output_dir);
+
+                for (size_t i = 0; i < node.scatter_outputs.size(); ++i)
+                {
+                    const auto &scatter_out = node.scatter_outputs[i];
+                    // Use the original filename from the scattered output
+                    std::string filename = scatter_out.filename().string();
+
+                    // If it's a temp path, generate a meaningful name
+                    if (is_temp_path(scatter_out))
+                    {
+                        std::string stem = graph.source().stem().string();
+                        if (stem.empty()) stem = "output";
+                        std::ostringstream fname;
+                        fname << stem;
+                        if (!transform.empty())
+                            fname << "_" << transform;
+                        fname << "_" << std::setw(4) << std::setfill('0') << i
+                              << "." << output_format;
+                        filename = fname.str();
+                    }
+
+                    std::filesystem::path final_path = output_dir / filename;
+
+                    try
+                    {
+                        if (std::filesystem::exists(final_path))
+                        {
+                            if (pipeline.core_options.force)
+                                std::filesystem::remove(final_path);
+                        }
+                        std::filesystem::rename(scatter_out, final_path);
+                        result.final_outputs.push_back(final_path);
+                    }
+                    catch (const std::filesystem::filesystem_error &)
+                    {
+                        try
+                        {
+                            std::filesystem::copy_file(scatter_out, final_path,
+                                std::filesystem::copy_options::overwrite_existing);
+                            std::filesystem::remove(scatter_out);
+                            result.final_outputs.push_back(final_path);
+                        }
+                        catch (const std::filesystem::filesystem_error &)
+                        {
+                            result.final_outputs.push_back(scatter_out);
+                        }
+                    }
+                }
+                continue;
+            }
+
+            // Determine final output path (single output)
             std::filesystem::path final_path;
 
             // Check for explicit output in node options
@@ -547,6 +833,22 @@ namespace uniconv::core
         std::ostringstream filename;
         filename << "s" << stage_index
                  << "_e" << element_index
+                 << "." << target;
+
+        return temp_dir_ / filename.str();
+    }
+
+    std::filesystem::path PipelineExecutor::generate_scatter_temp_path(
+        const std::string &target,
+        size_t stage_index,
+        size_t element_index,
+        size_t scatter_index)
+    {
+        // Format: run_dir / "s{idx}_e{idx}_i{scatter_idx}.{target}"
+        std::ostringstream filename;
+        filename << "s" << stage_index
+                 << "_e" << element_index
+                 << "_i" << scatter_index
                  << "." << target;
 
         return temp_dir_ / filename.str();

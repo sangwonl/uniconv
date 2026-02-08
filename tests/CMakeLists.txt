@@ -21,6 +21,7 @@ set(UNICONV_SOURCES
     ${CMAKE_SOURCE_DIR}/src/cli/parser.cpp
     ${CMAKE_SOURCE_DIR}/src/cli/pipeline_parser.cpp
     ${CMAKE_SOURCE_DIR}/src/builtins/tee.cpp
+    ${CMAKE_SOURCE_DIR}/src/builtins/collect.cpp
     ${CMAKE_SOURCE_DIR}/src/builtins/clipboard.cpp
     ${CMAKE_SOURCE_DIR}/src/builtins/passthrough.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/file_utils.cpp
@@ -49,6 +50,7 @@ add_executable(uniconv_tests
     unit/test_installed_plugins.cpp
     unit/test_clipboard.cpp
     unit/test_output_progress.cpp
+    unit/test_scatter_collect.cpp
     ${UNICONV_SOURCES}
 )
 

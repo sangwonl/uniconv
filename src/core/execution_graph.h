@@ -34,19 +34,24 @@ struct ExecutionNode {
 
     // Builtin flags
     bool is_tee = false;
+    bool is_collect = false;
     bool is_clipboard = false;
     bool is_passthrough = false;
+
+    // Scatter/collect state
+    std::vector<std::filesystem::path> scatter_outputs;  // Populated at runtime when plugin returns "outputs"
+    std::vector<std::filesystem::path> collect_inputs;   // Populated at runtime for collect node
 
     // Execution state
     bool executed = false;
     bool content_copied_to_clipboard = false;        // For clipboard nodes
 
     // Helper methods
-    bool is_builtin() const { return is_tee || is_clipboard || is_passthrough; }
+    bool is_builtin() const { return is_tee || is_collect || is_clipboard || is_passthrough; }
     bool is_terminal() const { return output_nodes.empty(); }
     // Only conversion nodes produce new files
-    // tee, clipboard, and passthrough do not produce new files
-    bool has_file_output() const { return !is_tee && !is_clipboard && !is_passthrough; }
+    // tee, clipboard, collect, and passthrough do not produce new files
+    bool has_file_output() const { return !is_tee && !is_collect && !is_clipboard && !is_passthrough; }
 };
 
 // The execution graph tracks all nodes and their relationships

@@ -575,10 +575,19 @@ namespace uniconv::core
             bool success = j.value("success", exec_result.exit_code == 0);
             result.status = success ? ResultStatus::Success : ResultStatus::Error;
 
-            // Output path
+            // Output path (single output)
             if (j.contains("output"))
             {
                 result.output = j.at("output").get<std::string>();
+            }
+
+            // Scatter outputs (multiple outputs from 1→N plugin)
+            if (j.contains("outputs") && j.at("outputs").is_array())
+            {
+                for (const auto &o : j.at("outputs"))
+                {
+                    result.outputs.push_back(o.get<std::string>());
+                }
             }
 
             // Output size

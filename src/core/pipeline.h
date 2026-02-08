@@ -18,6 +18,7 @@ struct StageElement {
     std::vector<std::string> raw_options;            // Raw option strings for plugin
 
     bool is_tee() const { return target == "tee"; }
+    bool is_collect() const { return target == "collect"; }
     bool is_clipboard() const { return target == "clipboard"; }
     bool is_passthrough() const {
         return target == "_" || target == "echo" || target == "bypass" ||
@@ -44,6 +45,12 @@ struct PipelineStage {
     bool has_tee() const {
         for (const auto& elem : elements) {
             if (elem.is_tee()) return true;
+        }
+        return false;
+    }
+    bool has_collect() const {
+        for (const auto& elem : elements) {
+            if (elem.is_collect()) return true;
         }
         return false;
     }
@@ -100,6 +107,22 @@ struct Pipeline {
             return ValidationResult::fail("'tee' cannot be the last stage (needs consumers)");
         }
 
+        // Validate collect position: cannot be the first stage (needs inputs)
+        if (!stages.empty() && stages.front().has_collect()) {
+            return ValidationResult::fail("'collect' cannot be the first stage (needs scattered inputs)");
+        }
+
+        // Validate collect stage must have exactly one element
+        for (size_t i = 0; i < stages.size(); ++i) {
+            if (stages[i].has_collect() && stages[i].element_count() != 1) {
+                return ValidationResult::fail(
+                    "Stage " + std::to_string(i) + " has 'collect' with " +
+                    std::to_string(stages[i].element_count()) +
+                    " elements (collect must be the only element in its stage)"
+                );
+            }
+        }
+
         // Note: clipboard CAN be any stage (including first) because it receives
         // input from either the source file or the previous stage's output
 
@@ -126,13 +149,19 @@ struct Pipeline {
                 continue;
             }
 
+            // Rule: N → 1 (collect) — fan-in (OK)
+            // collect gathers N streams into 1
+            if (current_count > 1 && next_count == 1 && next.has_collect()) {
+                continue;
+            }
+
             // Rule: N → M where N ≠ M (INVALID)
             if (current_count != next_count) {
                 return ValidationResult::fail(
                     "Stage " + std::to_string(i) + " has " +
                     std::to_string(current_count) + " elements but stage " +
                     std::to_string(i + 1) + " has " + std::to_string(next_count) +
-                    " elements (use 'tee' to branch)"
+                    " elements (use 'tee' to branch or 'collect' to gather)"
                 );
             }
 

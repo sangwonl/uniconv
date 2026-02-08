@@ -215,10 +215,14 @@ namespace uniconv::core
         std::string plugin_used;
         std::filesystem::path input;
         std::optional<std::filesystem::path> output;
+        std::vector<std::filesystem::path> outputs; // Scatter: multiple output files
         size_t input_size = 0;
         std::optional<size_t> output_size;
         std::optional<std::string> error;
         nlohmann::json extra; // Plugin-specific result data
+
+        // Check if this result is a scatter (1→N) result
+        bool is_scatter() const { return !outputs.empty(); }
 
         nlohmann::json to_json() const
         {
@@ -244,6 +248,14 @@ namespace uniconv::core
             if (error)
             {
                 j["error"] = *error;
+            }
+            if (!outputs.empty())
+            {
+                j["outputs"] = nlohmann::json::array();
+                for (const auto &o : outputs)
+                {
+                    j["outputs"].push_back(o.string());
+                }
             }
             if (!extra.empty())
             {

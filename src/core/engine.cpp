@@ -38,9 +38,15 @@ namespace uniconv::core
         // Get input file info
         std::string input_format;
         size_t input_size = 0;
+        bool is_directory_input = !is_generator && std::filesystem::is_directory(request.source);
         if (is_generator)
         {
             input_format = request.input_format.value_or("");
+        }
+        else if (is_directory_input)
+        {
+            // Directory input (e.g., from collect stage) — skip format detection and size
+            input_format = request.input_format.value_or("directory");
         }
         else
         {
@@ -53,7 +59,7 @@ namespace uniconv::core
         ctx.input_format = input_format;
         ctx.target = request.target;
         ctx.explicit_plugin = request.plugin;
-        ctx.input_types = is_generator ? std::vector<DataType>{} : utils::detect_input_types(input_format);
+        ctx.input_types = (is_generator || is_directory_input) ? std::vector<DataType>{} : utils::detect_input_types(input_format);
 
         // Find appropriate plugin using the enhanced resolver
         auto *plugin = plugin_manager_->find_plugin(ctx);
@@ -66,8 +72,8 @@ namespace uniconv::core
                 "No plugin found for: " + input_format + " -> " + request.target);
         }
 
-        // Check if plugin supports the input format (skip for generators)
-        if (!is_generator && !plugin->supports_input(input_format))
+        // Check if plugin supports the input format (skip for generators and directory inputs)
+        if (!is_generator && !is_directory_input && !plugin->supports_input(input_format))
         {
             return Result::failure(
                 request.target,

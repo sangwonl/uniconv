@@ -70,6 +70,7 @@ add_executable(uniconv
     src/core/execution_graph.cpp
     src/plugins/plugin_interface.h
     src/builtins/tee.cpp
+    src/builtins/collect.cpp
     src/builtins/clipboard.cpp
     src/builtins/passthrough.cpp
     src/cli/parser.h
