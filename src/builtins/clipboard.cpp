@@ -1,10 +1,13 @@
 #include "clipboard.h"
+#include "utils/mime_detector.h"
 #include <algorithm>
 #include <array>
 #include <cctype>
+#include <cstdio>
 #include <cstdlib>
 #include <fstream>
 #include <sstream>
+#include <unordered_set>
 
 namespace uniconv::builtins {
 
@@ -13,6 +16,36 @@ namespace {
 // Execute a command and capture its exit status
 int execute_command(const std::string& cmd) {
     return std::system(cmd.c_str());
+}
+
+// Execute a command and capture binary output (safe for null bytes)
+std::string capture_command(const std::string& cmd, int& exit_status) {
+    std::string output;
+    FILE* pipe = popen(cmd.c_str(), "r");
+    if (!pipe) {
+        exit_status = -1;
+        return {};
+    }
+    char buf[4096];
+    while (true) {
+        size_t n = fread(buf, 1, sizeof(buf), pipe);
+        if (n == 0) break;
+        output.append(buf, n);
+    }
+    exit_status = pclose(pipe);
+    return output;
+}
+
+// Check if a format string is a text format
+bool is_text_format(const std::string& fmt) {
+    static const std::unordered_set<std::string> text_formats = {
+        "txt", "md", "json", "xml", "csv", "html", "htm",
+        "yaml", "yml", "log"
+    };
+    std::string lower = fmt;
+    std::transform(lower.begin(), lower.end(), lower.begin(),
+                   [](unsigned char c) { return std::tolower(c); });
+    return text_formats.count(lower) > 0;
 }
 
 // Escape string for shell
@@ -153,6 +186,65 @@ bool Clipboard::copy_path_to_clipboard(const std::filesystem::path& file, std::s
     return write_text_to_clipboard(std::filesystem::absolute(file).string(), error);
 }
 
+// --- Clipboard read orchestrator ---
+
+Clipboard::ReadResult Clipboard::read_to_file(
+    const std::filesystem::path& temp_dir,
+    const std::optional<std::string>& format_hint) {
+
+    ReadResult result;
+    std::filesystem::create_directories(temp_dir);
+
+    bool try_image = true;
+    bool try_text = true;
+
+    // If format_hint is a text format, skip image attempt
+    if (format_hint.has_value() && is_text_format(*format_hint)) {
+        try_image = false;
+    }
+
+    std::string error;
+    std::optional<RawContent> content;
+
+    if (try_image) {
+        content = read_image_from_clipboard(error);
+    }
+
+    if (!content && try_text) {
+        error.clear();
+        content = read_text_from_clipboard(error);
+    }
+
+    if (!content) {
+        result.error = "Failed to read from clipboard: " +
+            (error.empty() ? "clipboard is empty or unsupported content" : error);
+        return result;
+    }
+
+    // Detect actual format from content bytes via libmagic
+    std::string detected_ext = content->format;  // fallback to clipboard-declared format
+    utils::MimeDetector detector;
+    std::string mime_ext = detector.detect_extension(content->data.data(), content->data.size());
+    if (mime_ext != "dat") {
+        detected_ext = mime_ext;
+    }
+
+    // Write content to temp file
+    auto out_path = temp_dir / ("clipboard." + detected_ext);
+    std::ofstream ofs(out_path, std::ios::binary);
+    if (!ofs) {
+        result.error = "Failed to create temp file: " + out_path.string();
+        return result;
+    }
+    ofs.write(content->data.data(), static_cast<std::streamsize>(content->data.size()));
+    ofs.close();
+
+    result.success = true;
+    result.file = out_path;
+    result.detected_format = detected_ext;
+    return result;
+}
+
 // Platform-specific implementations
 
 #if defined(__APPLE__)
@@ -205,6 +297,78 @@ bool Clipboard::write_image_to_clipboard(const std::filesystem::path& image_path
     }
 
     return true;
+}
+
+std::optional<Clipboard::RawContent> Clipboard::read_image_from_clipboard(std::string& error) {
+    // Use osascript JXA to read image from clipboard
+    // NSImage reads any image type from pasteboard, we save as raw TIFF data
+    auto temp_path = std::filesystem::temp_directory_path() / "uniconv" / "clipboard_read.dat";
+    std::filesystem::create_directories(temp_path.parent_path());
+    std::string escaped_path;
+    for (char c : temp_path.string()) {
+        if (c == '\'') {
+            escaped_path += "\\'";
+        } else {
+            escaped_path += c;
+        }
+    }
+
+    std::string cmd = "osascript -l JavaScript -e '"
+        "ObjC.import(\"Cocoa\"); "
+        "var pb = $.NSPasteboard.generalPasteboard; "
+        "var image = $.NSImage.alloc.initWithPasteboard(pb); "
+        "if (image.isNil()) { \"no-image\"; } else { "
+        "var tiffData = $.NSData.dataWithData(image.TIFFRepresentation); "
+        "if (!tiffData || tiffData.length === 0) { \"no-data\"; } else { "
+        "tiffData.writeToFileAtomically(\"" + escaped_path + "\", true); "
+        "\"success\"; } }' 2>/dev/null";
+
+    int exit_status = 0;
+    std::string output = capture_command(cmd, exit_status);
+
+    // Trim whitespace from JXA output
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r' || output.back() == ' ')) {
+        output.pop_back();
+    }
+
+    if (exit_status != 0 || output != "success") {
+        error = "No image data in clipboard";
+        return std::nullopt;
+    }
+
+    // Read the temp file
+    std::ifstream ifs(temp_path, std::ios::binary);
+    if (!ifs) {
+        error = "Failed to read clipboard image temp file";
+        return std::nullopt;
+    }
+    std::string data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    ifs.close();
+    std::filesystem::remove(temp_path);
+
+    if (data.empty()) {
+        error = "Clipboard image data is empty";
+        return std::nullopt;
+    }
+
+    return RawContent{std::move(data), "png"};
+}
+
+std::optional<Clipboard::RawContent> Clipboard::read_text_from_clipboard(std::string& error) {
+    int exit_status = 0;
+    std::string data = capture_command("pbpaste 2>/dev/null", exit_status);
+
+    if (exit_status != 0) {
+        error = "pbpaste failed";
+        return std::nullopt;
+    }
+
+    if (data.empty()) {
+        error = "No text data in clipboard";
+        return std::nullopt;
+    }
+
+    return RawContent{std::move(data), "txt"};
 }
 
 #elif defined(__linux__)
@@ -295,6 +459,72 @@ bool Clipboard::write_image_to_clipboard(const std::filesystem::path& image_path
     return false;
 }
 
+std::optional<Clipboard::RawContent> Clipboard::read_image_from_clipboard(std::string& error) {
+    const char* display = std::getenv("DISPLAY");
+    const char* wayland = std::getenv("WAYLAND_DISPLAY");
+
+    if (!display && !wayland) {
+        error = "No display available (DISPLAY or WAYLAND_DISPLAY not set)";
+        return std::nullopt;
+    }
+
+    int exit_status = 0;
+    std::string data;
+
+    // Try xclip
+    data = capture_command("xclip -selection clipboard -t image/png -o 2>/dev/null", exit_status);
+    if (exit_status == 0 && !data.empty()) {
+        return RawContent{std::move(data), "png"};
+    }
+
+    // Try wl-paste for Wayland
+    if (wayland) {
+        data = capture_command("wl-paste --type image/png 2>/dev/null", exit_status);
+        if (exit_status == 0 && !data.empty()) {
+            return RawContent{std::move(data), "png"};
+        }
+    }
+
+    error = "No image data in clipboard";
+    return std::nullopt;
+}
+
+std::optional<Clipboard::RawContent> Clipboard::read_text_from_clipboard(std::string& error) {
+    const char* display = std::getenv("DISPLAY");
+    const char* wayland = std::getenv("WAYLAND_DISPLAY");
+
+    if (!display && !wayland) {
+        error = "No display available (DISPLAY or WAYLAND_DISPLAY not set)";
+        return std::nullopt;
+    }
+
+    int exit_status = 0;
+    std::string data;
+
+    // Try xclip
+    data = capture_command("xclip -selection clipboard -o 2>/dev/null", exit_status);
+    if (exit_status == 0 && !data.empty()) {
+        return RawContent{std::move(data), "txt"};
+    }
+
+    // Try xsel
+    data = capture_command("xsel --clipboard --output 2>/dev/null", exit_status);
+    if (exit_status == 0 && !data.empty()) {
+        return RawContent{std::move(data), "txt"};
+    }
+
+    // Try wl-paste for Wayland
+    if (wayland) {
+        data = capture_command("wl-paste 2>/dev/null", exit_status);
+        if (exit_status == 0 && !data.empty()) {
+            return RawContent{std::move(data), "txt"};
+        }
+    }
+
+    error = "Failed to read text from clipboard (xclip, xsel, and wl-paste all failed)";
+    return std::nullopt;
+}
+
 #elif defined(_WIN32)
 
 bool Clipboard::write_text_to_clipboard(const std::string& text, std::string& error) {
@@ -326,6 +556,66 @@ bool Clipboard::write_image_to_clipboard(const std::filesystem::path& image_path
     return true;
 }
 
+std::optional<Clipboard::RawContent> Clipboard::read_image_from_clipboard(std::string& error) {
+    // Use PowerShell to save clipboard image to temp file
+    auto temp_path = std::filesystem::temp_directory_path() / "uniconv" / "clipboard_read.png";
+    std::filesystem::create_directories(temp_path.parent_path());
+    std::string escaped_path = shell_escape(temp_path.string());
+
+    std::string cmd = "powershell -command \""
+        "Add-Type -AssemblyName System.Windows.Forms; "
+        "$img = [System.Windows.Forms.Clipboard]::GetImage(); "
+        "if ($img -ne $null) { $img.Save(" + escaped_path + "); 'success' } "
+        "else { 'no-image' }\"";
+
+    int exit_status = 0;
+    std::string output = capture_command(cmd, exit_status);
+
+    // Trim whitespace
+    while (!output.empty() && (output.back() == '\n' || output.back() == '\r' || output.back() == ' ')) {
+        output.pop_back();
+    }
+
+    if (exit_status != 0 || output.find("success") == std::string::npos) {
+        error = "No image data in clipboard";
+        return std::nullopt;
+    }
+
+    std::ifstream ifs(temp_path, std::ios::binary);
+    if (!ifs) {
+        error = "Failed to read clipboard image temp file";
+        return std::nullopt;
+    }
+    std::string data((std::istreambuf_iterator<char>(ifs)), std::istreambuf_iterator<char>());
+    ifs.close();
+    std::filesystem::remove(temp_path);
+
+    if (data.empty()) {
+        error = "Clipboard image data is empty";
+        return std::nullopt;
+    }
+
+    return RawContent{std::move(data), "png"};
+}
+
+std::optional<Clipboard::RawContent> Clipboard::read_text_from_clipboard(std::string& error) {
+    int exit_status = 0;
+    std::string data = capture_command(
+        "powershell -command \"Get-Clipboard\" 2>NUL", exit_status);
+
+    if (exit_status != 0) {
+        error = "PowerShell Get-Clipboard failed";
+        return std::nullopt;
+    }
+
+    if (data.empty()) {
+        error = "No text data in clipboard";
+        return std::nullopt;
+    }
+
+    return RawContent{std::move(data), "txt"};
+}
+
 #else
 
 // Unsupported platform
@@ -337,6 +627,16 @@ bool Clipboard::write_text_to_clipboard(const std::string& /*text*/, std::string
 bool Clipboard::write_image_to_clipboard(const std::filesystem::path& /*image_path*/, std::string& error) {
     error = "Clipboard operations not supported on this platform";
     return false;
+}
+
+std::optional<Clipboard::RawContent> Clipboard::read_image_from_clipboard(std::string& error) {
+    error = "Clipboard read not supported on this platform";
+    return std::nullopt;
+}
+
+std::optional<Clipboard::RawContent> Clipboard::read_text_from_clipboard(std::string& error) {
+    error = "Clipboard read not supported on this platform";
+    return std::nullopt;
 }
 
 #endif

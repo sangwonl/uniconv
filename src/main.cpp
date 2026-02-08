@@ -14,6 +14,7 @@
 #include "core/output/output.h"
 #include "core/output/console_output.h"
 #include "core/output/json_output.h"
+#include "builtins/clipboard.h"
 #include "utils/mime_detector.h"
 #include <uniconv/version.h>
 #include <csignal>
@@ -214,9 +215,31 @@ int main(int argc, char **argv)
             std::string pipeline_str = args.pipeline;
             std::filesystem::path stdin_temp_file; // track for cleanup
 
+            // Validate --from-clipboard usage
+            if (args.from_clipboard && (!args.input.has_value() || *args.input != "-"))
+            {
+                output->error("--from-clipboard requires '-' as the input source");
+                return 1;
+            }
+
             if (source == "-")
             {
-                if (!ISATTY(FILENO(stdin)))
+                if (args.from_clipboard)
+                {
+                    // Clipboard input mode
+                    auto temp_dir = std::filesystem::temp_directory_path() / "uniconv";
+                    auto clip_result = builtins::Clipboard::read_to_file(temp_dir, args.input_format);
+                    if (!clip_result.success)
+                    {
+                        output->error(clip_result.error);
+                        return 1;
+                    }
+                    stdin_temp_file = clip_result.file;
+                    source = stdin_temp_file;
+                    if (!args.input_format.has_value())
+                        args.input_format = clip_result.detected_format;
+                }
+                else if (!ISATTY(FILENO(stdin)))
                 {
                     // Piped data -> stdin mode: read into memory then materialize
                     std::string stdin_data(

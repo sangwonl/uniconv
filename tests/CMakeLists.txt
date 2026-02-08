@@ -28,6 +28,7 @@ set(UNICONV_SOURCES
     ${CMAKE_SOURCE_DIR}/src/utils/json_output.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/version_utils.cpp
     ${CMAKE_SOURCE_DIR}/src/utils/http_utils.cpp
+    ${CMAKE_SOURCE_DIR}/src/utils/mime_detector.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dependency_checker.cpp
     ${CMAKE_SOURCE_DIR}/src/core/dependency_installer.cpp
     ${CMAKE_SOURCE_DIR}/src/core/installed_plugins.cpp
@@ -56,6 +57,8 @@ target_link_libraries(uniconv_tests PRIVATE
     CLI11::CLI11
     nlohmann_json::nlohmann_json
     Threads::Threads
+    $<TARGET_NAME_IF_EXISTS:PkgConfig::LIBMAGIC>
+    $<TARGET_NAME_IF_EXISTS:LibMagic::LibMagic>
 )
 
 target_include_directories(uniconv_tests PRIVATE

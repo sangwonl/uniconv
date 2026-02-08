@@ -44,6 +44,7 @@ struct ParsedArgs {
     std::optional<std::string> input_format;
 
     // Flags
+    bool from_clipboard = false;
     bool interactive = false;
     bool no_interactive = false;
     bool list_registry = false;

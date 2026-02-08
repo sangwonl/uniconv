@@ -15,7 +15,7 @@ namespace uniconv::cli
         CLI::App app{"uniconv - Universal Converter & Content Intelligence Tool"};
         app.set_version_flag("-v,--version", UNICONV_VERSION);
         app.set_help_flag("-h,--help", "Show help");
-        app.positionals_at_end(true);
+        app.positionals_at_end(false);
         app.footer("\nPipeline Examples:\n"
                    "  uniconv photo.heic \"jpg\"                      # Convert HEIC to JPG\n"
                    "  uniconv photo.heic \"jpg --quality 90\"         # With quality option\n"
@@ -23,9 +23,10 @@ namespace uniconv::cli
                    "  uniconv -o out.png photo.heic \"png\"           # Specify output path\n"
                    "  uniconv -o ./out -r ./photos \"jpg\"            # Batch convert directory\n"
                    "  uniconv watch ./incoming \"jpg\"                # Watch directory for changes\n"
-                   "\nStdin & Generator:\n"
+                   "\nStdin, Clipboard & Generator:\n"
                    "  echo \"hello\" | uniconv - \"translate | txt\"    # Pipe from stdin (auto-detects format)\n"
                    "  cat data.csv | uniconv - \"json\"               # Convert piped CSV to JSON\n"
+                   "  uniconv - --from-clipboard \"png\"               # Clipboard image -> PNG file\n"
                    "  uniconv - \"random-noise --width 512 | png\"    # Generator (no input file)");
 
         setup_main_options(app, args);
@@ -72,9 +73,10 @@ namespace uniconv::cli
                    "  uniconv -o out.png photo.heic \"png\"           # Specify output path\n"
                    "  uniconv -o ./out -r ./photos \"jpg\"            # Batch convert directory\n"
                    "  uniconv watch ./incoming \"jpg\"                # Watch directory for changes\n"
-                   "\nStdin & Generator:\n"
+                   "\nStdin, Clipboard & Generator:\n"
                    "  echo \"hello\" | uniconv - \"translate | txt\"    # Pipe from stdin (auto-detects format)\n"
                    "  cat data.csv | uniconv - \"json\"               # Convert piped CSV to JSON\n"
+                   "  uniconv - --from-clipboard \"png\"               # Clipboard image -> PNG file\n"
                    "  uniconv - \"random-noise --width 512 | png\"    # Generator (no input file)");
         ParsedArgs dummy;
         setup_main_options(app, dummy);
@@ -106,6 +108,10 @@ namespace uniconv::cli
         // Input format hint (overrides auto-detection for stdin)
         app.add_option("--input-format", args.input_format, "Override auto-detected input format for stdin")
             ->type_name("FORMAT");
+
+        // Clipboard input
+        app.add_flag("--from-clipboard", args.from_clipboard,
+            "Read input from system clipboard (use with '-' as source)");
 
         // Positional arguments: <source> "<pipeline>"
         app.add_option("input", args.input, "Input file or directory")
