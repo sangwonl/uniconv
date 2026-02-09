@@ -82,6 +82,10 @@ namespace uniconv::core
         std::string type; // "string", "int", "float", "bool"
         std::string default_value;
         std::string description;
+        std::optional<double> min_value;
+        std::optional<double> max_value;
+        std::vector<std::string> choices;
+        std::vector<std::string> targets;
 
         nlohmann::json to_json() const
         {
@@ -92,6 +96,14 @@ namespace uniconv::core
                 j["default"] = default_value;
             if (!description.empty())
                 j["description"] = description;
+            if (min_value.has_value())
+                j["min"] = min_value.value();
+            if (max_value.has_value())
+                j["max"] = max_value.value();
+            if (!choices.empty())
+                j["choices"] = choices;
+            if (!targets.empty())
+                j["targets"] = targets;
             return j;
         }
 
@@ -109,6 +121,14 @@ namespace uniconv::core
                 }
             }
             opt.description = j.value("description", "");
+            if (j.contains("min") && j.at("min").is_number())
+                opt.min_value = j.at("min").get<double>();
+            if (j.contains("max") && j.at("max").is_number())
+                opt.max_value = j.at("max").get<double>();
+            if (j.contains("choices") && j.at("choices").is_array())
+                opt.choices = j.at("choices").get<std::vector<std::string>>();
+            if (j.contains("targets") && j.at("targets").is_array())
+                opt.targets = j.at("targets").get<std::vector<std::string>>();
             return opt;
         }
     };

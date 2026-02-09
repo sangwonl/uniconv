@@ -872,6 +872,30 @@ namespace uniconv::cli::commands
                     text << " (" << opt.type << ")";
                 if (!opt.default_value.empty())
                     text << " [default: " << opt.default_value << "]";
+                if (opt.min_value.has_value() || opt.max_value.has_value())
+                {
+                    text << " [range: ";
+                    if (opt.min_value.has_value())
+                        text << opt.min_value.value();
+                    else
+                        text << "..";
+                    text << "-";
+                    if (opt.max_value.has_value())
+                        text << opt.max_value.value();
+                    else
+                        text << "..";
+                    text << "]";
+                }
+                if (!opt.choices.empty())
+                {
+                    text << " [choices: ";
+                    for (size_t i = 0; i < opt.choices.size(); ++i)
+                    {
+                        if (i > 0) text << ", ";
+                        text << opt.choices[i];
+                    }
+                    text << "]";
+                }
                 if (!opt.description.empty())
                 {
                     text << "\n      " << opt.description;
