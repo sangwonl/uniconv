@@ -63,9 +63,8 @@ int main(int argc, char **argv)
         auto config_manager = std::make_shared<core::ConfigManager>();
         config_manager->load(); // Load config if exists
 
-        // Create engine and load external plugins
+        // Create engine (plugins loaded on-demand when needed)
         auto engine = std::make_shared<core::Engine>();
-        engine->plugin_manager().load_external_plugins();
 
         auto preset_manager = std::make_shared<core::PresetManager>();
 

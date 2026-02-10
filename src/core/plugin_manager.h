@@ -75,6 +75,16 @@ namespace uniconv::core
         PluginDiscovery discovery_;
         DependencyInstaller dep_installer_;
         bool external_loaded_ = false;
+
+        // Lazy discovery state
+        mutable std::vector<PluginManifest> manifests_;
+        mutable bool discovered_ = false;
+
+        // Scan plugin dirs and store manifests (lazy, first-access)
+        void ensure_discovered() const;
+
+        // Load only manifests matching a resolution context
+        void load_matching(const ResolutionContext &context);
     };
 
 } // namespace uniconv::core

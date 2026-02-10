@@ -32,6 +32,71 @@ namespace uniconv::core
         // All plugins are now external (loaded via load_external_plugins)
     }
 
+    void PluginManager::ensure_discovered() const
+    {
+        if (discovered_)
+            return;
+        manifests_ = discovery_.discover_all();
+        discovered_ = true;
+    }
+
+    void PluginManager::load_matching(const ResolutionContext &context)
+    {
+        ensure_discovered();
+
+        auto target = to_lower(context.target);
+        auto it = manifests_.begin();
+        while (it != manifests_.end())
+        {
+            bool matches = false;
+
+            // Match by target
+            for (const auto &t : it->targets)
+            {
+                if (to_lower(t) == target)
+                {
+                    matches = true;
+                    break;
+                }
+            }
+
+            // Match by explicit scope (@plugin syntax)
+            if (!matches && context.explicit_plugin &&
+                to_lower(it->scope) == to_lower(*context.explicit_plugin))
+            {
+                matches = true;
+            }
+
+            if (matches)
+            {
+                std::unique_ptr<plugins::IPlugin> plugin;
+
+                if (CLIPluginLoader::is_cli_plugin(*it))
+                {
+                    plugin = CLIPluginLoader::load(*it);
+                    if (auto *cp = dynamic_cast<CLIPlugin *>(plugin.get()))
+                    {
+                        cp->set_dep_environment(dep_installer_.get_env(it->name));
+                    }
+                }
+                else if (NativePluginLoader::is_native_plugin(*it))
+                {
+                    plugin = NativePluginLoader::load(*it);
+                }
+
+                if (plugin)
+                {
+                    register_plugin(std::move(plugin));
+                }
+                it = manifests_.erase(it);
+            }
+            else
+            {
+                ++it;
+            }
+        }
+    }
+
     void PluginManager::load_external_plugins()
     {
         if (external_loaded_)
@@ -39,8 +104,9 @@ namespace uniconv::core
             return; // Already loaded
         }
 
-        auto manifests = discovery_.discover_all();
-        for (const auto &manifest : manifests)
+        ensure_discovered();
+
+        for (const auto &manifest : manifests_)
         {
             std::unique_ptr<plugins::IPlugin> plugin;
 
@@ -65,6 +131,7 @@ namespace uniconv::core
             }
         }
 
+        manifests_.clear();
         external_loaded_ = true;
     }
 
@@ -119,16 +186,23 @@ namespace uniconv::core
         ResolutionContext context;
         context.target = target;
         context.explicit_plugin = explicit_plugin;
-        // No input_format or input_types - will fall through to target-only matching
 
-        auto result = resolver_.resolve(context, plugins_);
-        return result.plugin;
+        return find_plugin(context);
     }
 
     // Find plugin with full resolution context (new enhanced method)
     plugins::IPlugin *PluginManager::find_plugin(const ResolutionContext &context)
     {
+        ensure_discovered();
+
+        // Try already-loaded plugins first
         auto result = resolver_.resolve(context, plugins_);
+        if (result.plugin)
+            return result.plugin;
+
+        // Load matching manifests and try again
+        load_matching(context);
+        result = resolver_.resolve(context, plugins_);
         return result.plugin;
     }
 
@@ -143,8 +217,7 @@ namespace uniconv::core
         context.target = target;
         context.input_types = utils::detect_input_types(input_format);
 
-        auto result = resolver_.resolve(context, plugins_);
-        return result.plugin;
+        return find_plugin(context);
     }
 
     // Check if two plugins can be connected - delegate to resolver
@@ -155,17 +228,25 @@ namespace uniconv::core
 
     std::vector<PluginInfo> PluginManager::list_plugins() const
     {
+        ensure_discovered();
+
         std::vector<PluginInfo> result;
-        result.reserve(plugins_.size());
+        result.reserve(plugins_.size() + manifests_.size());
         for (const auto &plugin : plugins_)
         {
             result.push_back(plugin->info());
+        }
+        for (const auto &m : manifests_)
+        {
+            result.push_back(m.to_plugin_info());
         }
         return result;
     }
 
     std::vector<PluginInfo> PluginManager::list_plugins_for_target(const std::string &target) const
     {
+        ensure_discovered();
+
         auto lower_target = to_lower(target);
         std::vector<PluginInfo> result;
         for (const auto &plugin : plugins_)
@@ -173,6 +254,17 @@ namespace uniconv::core
             if (plugin->supports_target(lower_target))
             {
                 result.push_back(plugin->info());
+            }
+        }
+        for (const auto &m : manifests_)
+        {
+            for (const auto &t : m.targets)
+            {
+                if (to_lower(t) == lower_target)
+                {
+                    result.push_back(m.to_plugin_info());
+                    break;
+                }
             }
         }
         return result;
