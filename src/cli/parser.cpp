@@ -270,10 +270,12 @@ namespace uniconv::cli
         auto *plugin_update = plugin_cmd->add_subcommand("update", "Update plugin(s)");
         plugin_update->fallthrough();
         plugin_update->add_option("name", args.subcommand, "Plugin name, +collection, or omit for all");
+        plugin_update->add_flag("--check", args.plugin_update_check, "Check for available updates without installing");
         plugin_update->footer("\nExamples:\n"
                               "  uniconv plugin update                # Update all plugins\n"
                               "  uniconv plugin update image-convert  # Update specific plugin\n"
-                              "  uniconv plugin update +essentials    # Update collection plugins");
+                              "  uniconv plugin update +essentials    # Update collection plugins\n"
+                              "  uniconv plugin update --check        # Check for updates without installing");
         plugin_update->callback([&args]()
                                 {
         args.command = Command::Plugin;

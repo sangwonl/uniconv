@@ -2,6 +2,7 @@
 #include <uniconv/plugin_api.h>
 #include <algorithm>
 #include <cstring>
+#include <iostream>
 #include <map>
 
 #ifdef _WIN32
@@ -350,6 +351,8 @@ namespace uniconv::core
             }
             else
             {
+                std::cerr << "Warning: native plugin '" << manifest.name
+                          << "' library not found: " << lib_path << std::endl;
                 return nullptr;
             }
         }
@@ -358,6 +361,8 @@ namespace uniconv::core
         void *handle = load_library(lib_path);
         if (!handle)
         {
+            std::cerr << "Warning: native plugin '" << manifest.name
+                      << "' failed to load: " << get_load_error() << std::endl;
             return nullptr;
         }
 
@@ -368,6 +373,8 @@ namespace uniconv::core
             auto init_fn = reinterpret_cast<UniconvPluginInitFunc>(init_func);
             if (init_fn() != 0)
             {
+                std::cerr << "Warning: native plugin '" << manifest.name
+                          << "' init failed" << std::endl;
                 unload_library(handle);
                 return nullptr;
             }
@@ -380,6 +387,8 @@ namespace uniconv::core
 
         if (!info_func || !execute_func)
         {
+            std::cerr << "Warning: native plugin '" << manifest.name
+                      << "' missing required symbols" << std::endl;
             unload_library(handle);
             return nullptr;
         }

@@ -1075,6 +1075,43 @@ namespace uniconv::cli::commands
             return 0;
         }
 
+        // --check: report available updates without installing
+        if (args.plugin_update_check)
+        {
+            nlohmann::json j;
+            j["updates"] = nlohmann::json::array();
+            std::ostringstream text;
+
+            for (const auto &name : to_update)
+            {
+                auto record = installed_.get(name);
+                if (!record)
+                    continue;
+                auto entry = client->fetch_plugin(name);
+                if (!entry)
+                    continue;
+                auto release = client->resolve_release(*entry);
+                if (!release)
+                    continue;
+                if (utils::compare_versions(release->version, record->version) > 0)
+                {
+                    nlohmann::json uj;
+                    uj["name"] = name;
+                    uj["current"] = record->version;
+                    uj["latest"] = release->version;
+                    j["updates"].push_back(uj);
+                    text << name << " " << record->version << " -> " << release->version << "\n";
+                }
+            }
+
+            if (j["updates"].empty())
+            {
+                output_->info("All plugins are up to date");
+            }
+            output_->data(j, text.str());
+            return 0;
+        }
+
         int updated = 0;
         int failed = 0;
 

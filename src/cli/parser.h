@@ -50,6 +50,7 @@ struct ParsedArgs {
     bool no_interactive = false;
     bool list_registry = false;
     bool update_check_only = false;
+    bool plugin_update_check = false;
     std::optional<std::string> preset;
 
     // Watch mode
