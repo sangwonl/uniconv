@@ -824,16 +824,34 @@ namespace uniconv::core
         return graph.source();
     }
 
+    static std::string target_to_extension(const std::string &target)
+    {
+        // Compound archive targets use hyphens (tar-gz) but the file
+        // extension uses dots (tar.gz).  Map them here so the final
+        // output path gets the correct extension.
+        static const std::vector<std::pair<std::string, std::string>> compound_map = {
+            {"tar-gz", "tar.gz"},
+            {"tar-bz2", "tar.bz2"},
+            {"tar-xz", "tar.xz"},
+        };
+        for (const auto &[key, ext] : compound_map)
+        {
+            if (target == key)
+                return ext;
+        }
+        return target;
+    }
+
     std::filesystem::path PipelineExecutor::generate_temp_path(
         const std::string &target,
         size_t stage_index,
         size_t element_index)
     {
-        // Format: run_dir / "s{idx}_e{idx}.{target}"
+        // Format: run_dir / "s{idx}_e{idx}.{ext}"
         std::ostringstream filename;
         filename << "s" << stage_index
                  << "_e" << element_index
-                 << "." << target;
+                 << "." << target_to_extension(target);
 
         return temp_dir_ / filename.str();
     }
@@ -844,12 +862,12 @@ namespace uniconv::core
         size_t element_index,
         size_t scatter_index)
     {
-        // Format: run_dir / "s{idx}_e{idx}_i{scatter_idx}.{target}"
+        // Format: run_dir / "s{idx}_e{idx}_i{scatter_idx}.{ext}"
         std::ostringstream filename;
         filename << "s" << stage_index
                  << "_e" << element_index
                  << "_i" << scatter_index
-                 << "." << target;
+                 << "." << target_to_extension(target);
 
         return temp_dir_ / filename.str();
     }
@@ -868,7 +886,7 @@ namespace uniconv::core
         {
             output += "_" + transform_suffix;
         }
-        output += "." + target;
+        output += "." + target_to_extension(target);
 
         return output;
     }
@@ -907,7 +925,7 @@ namespace uniconv::core
             {
                 output += "_" + transform_suffix;
             }
-            output += "." + target;
+            output += "." + target_to_extension(target);
             return output;
         }
         else if (out_path.has_extension())
@@ -963,7 +981,10 @@ namespace uniconv::core
         "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
         // Text formats
         "txt", "md", "json", "xml", "csv", "html", "htm", "yaml", "yml", "log",
-        "text", "rtf"};
+        "text", "rtf",
+        // Archive formats
+        "zip", "tar", "gz", "bz2", "xz", "7z", "tgz", "tbz2", "txz",
+        "tar-gz", "tar-bz2", "tar-xz"};
 
     bool PipelineExecutor::is_clipboard_content_copyable(const std::string &target)
     {
