@@ -151,8 +151,8 @@ namespace uniconv::cli::commands
 
             std::string source = installed_.is_registry_installed(m.name) ? "registry" : "local";
 
-            // Show scope/name for third-party plugins, just name for official (uniconv)
-            std::string display_name = (m.scope != "uniconv") ? m.scope + "/" + m.name : m.name;
+            // Show scope@name for third-party plugins, just name for official (uniconv)
+            std::string display_name = m.id();
 
             text << std::left
                  << std::setw(25) << display_name

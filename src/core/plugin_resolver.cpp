@@ -112,11 +112,32 @@ namespace uniconv::core
         auto lower_scope = to_lower(scope);
         auto lower_target = to_lower(target);
 
+        // Check if scope contains @ (scope@name format)
+        auto at_pos = lower_scope.find('@');
+        std::string match_scope, match_name;
+        if (at_pos != std::string::npos)
+        {
+            match_scope = lower_scope.substr(0, at_pos);
+            match_name = lower_scope.substr(at_pos + 1);
+        }
+
         for (const auto &plugin : plugins)
         {
             auto info = plugin->info();
-            if (to_lower(info.scope) == lower_scope &&
-                plugin->supports_target(lower_target))
+            bool scope_match;
+            if (!match_name.empty())
+            {
+                // scope@name: match both scope and name
+                scope_match = to_lower(info.scope) == match_scope &&
+                              to_lower(info.name) == match_name;
+            }
+            else
+            {
+                // scope-only: match scope
+                scope_match = to_lower(info.scope) == lower_scope;
+            }
+
+            if (scope_match && plugin->supports_target(lower_target))
             {
                 return plugin.get();
             }

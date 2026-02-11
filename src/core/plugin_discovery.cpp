@@ -2,6 +2,7 @@
 #include <algorithm>
 #include <cstdlib>
 #include <fstream>
+#include <set>
 
 #ifdef _WIN32
 #include <windows.h>
@@ -90,12 +91,15 @@ void PluginDiscovery::add_plugin_dir(const std::filesystem::path& dir) {
 
 std::vector<PluginManifest> PluginDiscovery::discover_all() const {
     std::vector<PluginManifest> manifests;
+    std::set<std::string> seen_names;
 
     for (const auto& dir : plugin_dirs_) {
         auto discovered = discover_in_dir(dir);
-        manifests.insert(manifests.end(),
-                        std::make_move_iterator(discovered.begin()),
-                        std::make_move_iterator(discovered.end()));
+        for (auto& m : discovered) {
+            if (seen_names.insert(m.name).second) {
+                manifests.push_back(std::move(m));
+            }
+        }
     }
 
     return manifests;
