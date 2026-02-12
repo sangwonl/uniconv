@@ -272,7 +272,8 @@ namespace uniconv::core
         result.target = request.target;
         result.plugin_used = manifest_.scope;
         result.input = request.source;
-        result.input_size = std::filesystem::file_size(request.source);
+        result.input_size = std::filesystem::is_directory(request.source)
+            ? 0 : std::filesystem::file_size(request.source);
 
         switch (native_result->status)
         {

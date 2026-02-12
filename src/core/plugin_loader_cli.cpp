@@ -603,7 +603,8 @@ namespace uniconv::core
             {
                 result.output_size = j.at("output_size").get<size_t>();
             }
-            else if (result.output && std::filesystem::exists(*result.output))
+            else if (result.output && std::filesystem::exists(*result.output) &&
+                     !std::filesystem::is_directory(*result.output))
             {
                 result.output_size = std::filesystem::file_size(*result.output);
             }
@@ -656,7 +657,8 @@ namespace uniconv::core
 
         // Parse and return result
         auto result = parse_result(request, exec_result);
-        result.input_size = request.source.empty() ? 0 : std::filesystem::file_size(request.source);
+        result.input_size = (request.source.empty() || std::filesystem::is_directory(request.source))
+            ? 0 : std::filesystem::file_size(request.source);
         return result;
     }
 

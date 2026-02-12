@@ -163,7 +163,8 @@ namespace uniconv::core
         // Get output size if successful
         if (result.status == ResultStatus::Success && result.output)
         {
-            if (std::filesystem::exists(*result.output))
+            if (std::filesystem::exists(*result.output) &&
+                !std::filesystem::is_directory(*result.output))
             {
                 result.output_size = std::filesystem::file_size(*result.output);
             }

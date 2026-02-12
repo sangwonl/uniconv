@@ -111,9 +111,11 @@ struct Pipeline {
             return ValidationResult::fail("'tee' cannot be the last stage (needs consumers)");
         }
 
-        // Validate collect position: cannot be the first stage (needs inputs)
+        // Validate collect position: first stage requires a directory source
         if (!stages.empty() && stages.front().has_collect()) {
-            return ValidationResult::fail("'collect' cannot be the first stage (needs scattered inputs)");
+            if (source.empty() || !std::filesystem::is_directory(source)) {
+                return ValidationResult::fail("'collect' as the first stage requires a directory input");
+            }
         }
 
         // Validate collect stage must have exactly one element

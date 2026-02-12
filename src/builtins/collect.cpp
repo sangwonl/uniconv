@@ -1,6 +1,7 @@
 #include "collect.h"
 #include <algorithm>
 #include <cctype>
+#include <fnmatch.h>
 #include <iomanip>
 #include <sstream>
 
@@ -60,19 +61,80 @@ Collect::Result Collect::execute(
     return result;
 }
 
+Collect::Result Collect::execute_directory(
+    const std::filesystem::path& directory,
+    const std::filesystem::path& temp_dir,
+    bool recursive,
+    const std::string& glob_pattern
+) {
+    Result result;
+
+    if (!std::filesystem::exists(directory)) {
+        result.success = false;
+        result.error = "Directory does not exist: " + directory.string();
+        return result;
+    }
+
+    if (!std::filesystem::is_directory(directory)) {
+        result.success = false;
+        result.error = "Not a directory: " + directory.string();
+        return result;
+    }
+
+    // Enumerate files from directory
+    std::vector<std::filesystem::path> files;
+
+    auto collect_entries = [&](auto iterator) {
+        for (const auto& entry : iterator) {
+            if (!entry.is_regular_file()) continue;
+
+            // Apply glob filter if specified
+            if (!glob_pattern.empty()) {
+                std::string filename = entry.path().filename().string();
+                if (fnmatch(glob_pattern.c_str(), filename.c_str(), 0) != 0) {
+                    continue;
+                }
+            }
+
+            files.push_back(entry.path());
+        }
+    };
+
+    try {
+        if (recursive) {
+            collect_entries(std::filesystem::recursive_directory_iterator(directory));
+        } else {
+            collect_entries(std::filesystem::directory_iterator(directory));
+        }
+    } catch (const std::filesystem::filesystem_error& e) {
+        result.success = false;
+        result.error = "Failed to enumerate directory: " + std::string(e.what());
+        return result;
+    }
+
+    if (files.empty()) {
+        result.success = false;
+        result.error = glob_pattern.empty()
+            ? "Directory is empty: " + directory.string()
+            : "No files matching '" + glob_pattern + "' in: " + directory.string();
+        return result;
+    }
+
+    // Sort alphabetically for consistent ordering
+    std::sort(files.begin(), files.end());
+
+    return execute(files, temp_dir);
+}
+
 Collect::ValidationResult Collect::validate(
     size_t current_stage_index,
     size_t total_stages
 ) {
     ValidationResult result;
 
-    // Collect cannot be the first stage (needs scattered inputs)
-    if (current_stage_index == 0) {
-        result.valid = false;
-        result.error = "Collect cannot be the first stage (it requires scattered inputs)";
-        return result;
-    }
-
+    // First-stage validation is handled at the pipeline level (where source path is available).
+    // Here we only validate structural constraints that don't depend on the source.
+    (void)current_stage_index;
     (void)total_stages;
     result.valid = true;
     return result;

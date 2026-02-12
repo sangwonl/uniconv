@@ -64,13 +64,14 @@ TEST_F(ScatterCollectParserTest, CollectSimpleGather)
 // Pipeline Validation: Collect Rules
 // ============================================================================
 
-TEST_F(ScatterCollectParserTest, CollectCannotBeFirstStage)
+TEST_F(ScatterCollectParserTest, CollectAsFirstStageRequiresDirectory)
 {
+    // File source (not a directory) should fail validation
     auto result = parser.parse("collect", test_source, default_options);
 
     EXPECT_FALSE(result.success);
     EXPECT_TRUE(result.error.find("collect") != std::string::npos ||
-                result.error.find("first") != std::string::npos);
+                result.error.find("directory") != std::string::npos);
 }
 
 TEST_F(ScatterCollectParserTest, CollectWithMultipleElementsFails)
@@ -229,10 +230,11 @@ TEST_F(CollectBuiltinTest, CollectPreservesOrder)
 // Collect Builtin: Validation
 // ============================================================================
 
-TEST(CollectValidationTest, CannotBeFirstStage)
+TEST(CollectValidationTest, FirstStageIsValid)
 {
+    // First-stage validation is now handled at the pipeline level, not here
     auto result = builtins::Collect::validate(0, 3);
-    EXPECT_FALSE(result.valid);
+    EXPECT_TRUE(result.valid);
 }
 
 TEST(CollectValidationTest, ValidMiddleStage)
@@ -339,4 +341,286 @@ TEST(ResultScatterTest, EmptyOutputsIsNotScatter)
 {
     core::Result r;
     EXPECT_FALSE(r.is_scatter());
+}
+
+// ============================================================================
+// Collect as First Stage: Pipeline Validation
+// ============================================================================
+
+class CollectFirstStageValidationTest : public ::testing::Test
+{
+protected:
+    std::filesystem::path temp_dir;
+
+    void SetUp() override
+    {
+        temp_dir = std::filesystem::temp_directory_path() / "uniconv_test_collect_first";
+        std::filesystem::create_directories(temp_dir);
+    }
+
+    void TearDown() override
+    {
+        std::filesystem::remove_all(temp_dir);
+    }
+};
+
+TEST_F(CollectFirstStageValidationTest, CollectAsFirstStageWithDirectory)
+{
+    // collect as first stage with a directory source should be valid
+    core::Pipeline pipeline;
+    pipeline.source = temp_dir; // existing directory
+
+    core::PipelineStage collect_stage;
+    core::StageElement collect_elem;
+    collect_elem.target = "collect";
+    collect_stage.elements.push_back(collect_elem);
+    pipeline.stages.push_back(collect_stage);
+
+    auto result = pipeline.validate();
+    EXPECT_TRUE(result.valid) << "Validation error: " << result.error;
+}
+
+TEST_F(CollectFirstStageValidationTest, CollectAsFirstStageWithFileFails)
+{
+    // collect as first stage with a file source should fail
+    auto file_path = temp_dir / "test.txt";
+    std::ofstream f(file_path);
+    f << "content";
+    f.close();
+
+    core::Pipeline pipeline;
+    pipeline.source = file_path;
+
+    core::PipelineStage collect_stage;
+    core::StageElement collect_elem;
+    collect_elem.target = "collect";
+    collect_stage.elements.push_back(collect_elem);
+    pipeline.stages.push_back(collect_stage);
+
+    auto result = pipeline.validate();
+    EXPECT_FALSE(result.valid);
+    EXPECT_TRUE(result.error.find("directory") != std::string::npos);
+}
+
+TEST_F(CollectFirstStageValidationTest, CollectAsFirstStageWithEmptySourceFails)
+{
+    core::Pipeline pipeline;
+    pipeline.source = ""; // empty source
+
+    core::PipelineStage collect_stage;
+    core::StageElement collect_elem;
+    collect_elem.target = "collect";
+    collect_stage.elements.push_back(collect_elem);
+    pipeline.stages.push_back(collect_stage);
+
+    auto result = pipeline.validate();
+    EXPECT_FALSE(result.valid);
+    EXPECT_TRUE(result.error.find("directory") != std::string::npos);
+}
+
+TEST_F(CollectFirstStageValidationTest, CollectAsFirstStageWithOptions)
+{
+    // collect with --glob and --recursive options should parse correctly
+    cli::PipelineParser parser;
+    core::CoreOptions default_options;
+
+    auto result = parser.parse("collect --glob '*.heic' --recursive", temp_dir, default_options);
+
+    ASSERT_TRUE(result.success) << "Parse failed: " << result.error;
+    ASSERT_EQ(result.pipeline.stages.size(), 1);
+    EXPECT_TRUE(result.pipeline.stages[0].has_collect());
+
+    const auto& elem = result.pipeline.stages[0].elements[0];
+    // Check that options were parsed
+    auto glob_it = elem.options.find("glob");
+    EXPECT_NE(glob_it, elem.options.end());
+    if (glob_it != elem.options.end()) {
+        EXPECT_EQ(glob_it->second, "*.heic");
+    }
+
+    auto rec_it = elem.options.find("recursive");
+    EXPECT_NE(rec_it, elem.options.end());
+}
+
+// ============================================================================
+// Collect::execute_directory
+// ============================================================================
+
+class CollectDirectoryTest : public ::testing::Test
+{
+protected:
+    std::filesystem::path test_dir;
+    std::filesystem::path temp_dir;
+
+    void SetUp() override
+    {
+        test_dir = std::filesystem::temp_directory_path() / "uniconv_test_collect_dir";
+        temp_dir = std::filesystem::temp_directory_path() / "uniconv_test_collect_dir_tmp";
+        std::filesystem::create_directories(test_dir);
+        std::filesystem::create_directories(temp_dir);
+    }
+
+    void TearDown() override
+    {
+        std::filesystem::remove_all(test_dir);
+        std::filesystem::remove_all(temp_dir);
+    }
+
+    std::filesystem::path create_file(const std::string& relative_path, const std::string& content)
+    {
+        auto path = test_dir / relative_path;
+        std::filesystem::create_directories(path.parent_path());
+        std::ofstream f(path);
+        f << content;
+        f.close();
+        return path;
+    }
+};
+
+TEST_F(CollectDirectoryTest, CollectFromDirectory)
+{
+    create_file("a.txt", "hello");
+    create_file("b.txt", "world");
+    create_file("c.txt", "test");
+
+    auto result = builtins::Collect::execute_directory(test_dir, temp_dir);
+
+    ASSERT_TRUE(result.success) << "Failed: " << result.error;
+    EXPECT_TRUE(std::filesystem::is_directory(result.output_dir));
+
+    // Count collected files
+    size_t count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(result.output_dir))
+    {
+        (void)entry;
+        count++;
+    }
+    EXPECT_EQ(count, 3);
+}
+
+TEST_F(CollectDirectoryTest, CollectWithGlobPattern)
+{
+    create_file("photo1.heic", "heic1");
+    create_file("photo2.heic", "heic2");
+    create_file("document.pdf", "pdf");
+    create_file("readme.txt", "txt");
+
+    auto result = builtins::Collect::execute_directory(test_dir, temp_dir, false, "*.heic");
+
+    ASSERT_TRUE(result.success) << "Failed: " << result.error;
+
+    size_t count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(result.output_dir))
+    {
+        (void)entry;
+        count++;
+    }
+    EXPECT_EQ(count, 2);
+}
+
+TEST_F(CollectDirectoryTest, CollectWithRecursive)
+{
+    create_file("a.txt", "top");
+    create_file("sub1/b.txt", "nested1");
+    create_file("sub1/sub2/c.txt", "nested2");
+
+    // Non-recursive should only find top-level files
+    auto result_flat = builtins::Collect::execute_directory(test_dir, temp_dir, false);
+    ASSERT_TRUE(result_flat.success) << "Failed: " << result_flat.error;
+
+    size_t flat_count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(result_flat.output_dir))
+    {
+        (void)entry;
+        flat_count++;
+    }
+    EXPECT_EQ(flat_count, 1);
+
+    // Clean up for recursive test
+    std::filesystem::remove_all(temp_dir);
+    std::filesystem::create_directories(temp_dir);
+
+    // Recursive should find all files
+    auto result_recursive = builtins::Collect::execute_directory(test_dir, temp_dir, true);
+    ASSERT_TRUE(result_recursive.success) << "Failed: " << result_recursive.error;
+
+    size_t recursive_count = 0;
+    for (const auto& entry : std::filesystem::directory_iterator(result_recursive.output_dir))
+    {
+        (void)entry;
+        recursive_count++;
+    }
+    EXPECT_EQ(recursive_count, 3);
+}
+
+TEST_F(CollectDirectoryTest, CollectEmptyDirectory)
+{
+    // Empty directory should fail
+    auto result = builtins::Collect::execute_directory(test_dir, temp_dir);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.error.find("empty") != std::string::npos);
+}
+
+TEST_F(CollectDirectoryTest, CollectNonexistentDirectory)
+{
+    auto nonexistent = test_dir / "does_not_exist";
+    auto result = builtins::Collect::execute_directory(nonexistent, temp_dir);
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.error.find("does not exist") != std::string::npos);
+}
+
+TEST_F(CollectDirectoryTest, CollectGlobNoMatches)
+{
+    create_file("a.txt", "hello");
+    create_file("b.txt", "world");
+
+    auto result = builtins::Collect::execute_directory(test_dir, temp_dir, false, "*.heic");
+
+    EXPECT_FALSE(result.success);
+    EXPECT_TRUE(result.error.find("No files matching") != std::string::npos);
+}
+
+// ============================================================================
+// ExecutionGraph: Collect as First Stage
+// ============================================================================
+
+TEST(ExecutionGraphCollectTest, CollectAsFirstStageWithDirectory)
+{
+    core::Pipeline pipeline;
+    pipeline.source = "/test/some_directory"; // directory source
+
+    // Stage 0: collect
+    core::PipelineStage collect_stage;
+    core::StageElement collect_elem;
+    collect_elem.target = "collect";
+    collect_stage.elements.push_back(collect_elem);
+    pipeline.stages.push_back(collect_stage);
+
+    // Stage 1: tar-gz
+    core::PipelineStage targz_stage;
+    core::StageElement targz_elem;
+    targz_elem.target = "tar-gz";
+    targz_stage.elements.push_back(targz_elem);
+    pipeline.stages.push_back(targz_stage);
+
+    core::ExecutionGraph graph;
+    graph.build_from_pipeline(pipeline);
+
+    // Should have 2 nodes: collect + tar-gz
+    ASSERT_EQ(graph.nodes().size(), 2);
+
+    // Collect node should be first, with source as input
+    const auto& collect_node = graph.nodes()[0];
+    EXPECT_TRUE(collect_node.is_collect);
+    EXPECT_EQ(collect_node.stage_idx, 0);
+    EXPECT_EQ(collect_node.input.string(), "/test/some_directory");
+    EXPECT_TRUE(collect_node.input_nodes.empty());
+
+    // tar-gz node should depend on collect
+    const auto& targz_node = graph.nodes()[1];
+    EXPECT_EQ(targz_node.target, "tar-gz");
+    EXPECT_EQ(targz_node.input_nodes.size(), 1);
+    EXPECT_EQ(targz_node.input_nodes[0], 0);
 }

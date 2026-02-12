@@ -176,6 +176,49 @@ namespace uniconv::core
         ExecutionGraph &graph,
         PipelineResult &result)
     {
+        // First-stage collect: enumerate files from directory source
+        if (node.stage_idx == 0)
+        {
+            auto dir_path = graph.source();
+            bool recursive = node.options.count("recursive") > 0;
+            std::string glob_pattern;
+            auto glob_it = node.options.find("glob");
+            if (glob_it != node.options.end())
+            {
+                glob_pattern = glob_it->second;
+            }
+
+            auto collect_result = builtins::Collect::execute_directory(
+                dir_path, temp_dir_, recursive, glob_pattern);
+
+            if (!collect_result.success)
+            {
+                node.status = ResultStatus::Error;
+                node.error = collect_result.error;
+                result.error = collect_result.error;
+                return false;
+            }
+
+            node.input = dir_path;
+            node.temp_output = collect_result.output_dir;
+            node.executed = true;
+            node.status = ResultStatus::Success;
+            node.plugin_used = "builtin:collect";
+
+            // Record stage result
+            StageResult stage_result;
+            stage_result.stage_index = node.stage_idx;
+            stage_result.target = "collect";
+            stage_result.plugin_used = "builtin:collect";
+            stage_result.input = dir_path;
+            stage_result.output = collect_result.output_dir;
+            stage_result.status = ResultStatus::Success;
+            stage_result.duration_ms = 0;
+            result.stage_results.push_back(stage_result);
+
+            return true;
+        }
+
         // Collect gathers all scattered paths into a temp directory
         // The scattered_paths_ vector holds the current N parallel file paths
 

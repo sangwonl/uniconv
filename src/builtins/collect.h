@@ -22,6 +22,15 @@ public:
         const std::filesystem::path& temp_dir
     );
 
+    // Execute collect from a directory source (first-stage collect).
+    // Enumerates files from directory, optionally filtering by glob pattern.
+    static Result execute_directory(
+        const std::filesystem::path& directory,
+        const std::filesystem::path& temp_dir,
+        bool recursive = false,
+        const std::string& glob_pattern = ""
+    );
+
     // Validate collect usage in pipeline context
     struct ValidationResult {
         bool valid = true;
