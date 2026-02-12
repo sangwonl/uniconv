@@ -337,6 +337,16 @@ namespace uniconv::core
         if (resolved_plugin)
         {
             node.is_sink = resolved_plugin->info().sink;
+            auto err = validate_required_options(
+                resolved_plugin->info().options, node.options, node.target);
+            if (!err.empty())
+            {
+                node.status = ResultStatus::Error;
+                node.error = err;
+                result.error = err;
+                result.success = false;
+                return false;
+            }
         }
 
         // Report progress: stage started
@@ -477,6 +487,16 @@ namespace uniconv::core
         if (resolved_plugin)
         {
             node.is_sink = resolved_plugin->info().sink;
+            auto err = validate_required_options(
+                resolved_plugin->info().options, node.options, node.target);
+            if (!err.empty())
+            {
+                node.status = ResultStatus::Error;
+                node.error = err;
+                result.error = err;
+                result.success = false;
+                return false;
+            }
         }
 
         // Execute the conversion once for each scattered input

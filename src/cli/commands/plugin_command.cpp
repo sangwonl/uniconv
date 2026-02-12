@@ -921,6 +921,8 @@ namespace uniconv::cli::commands
             for (const auto &opt : manifest->options)
             {
                 text << "\n  " << opt.name;
+                if (opt.required)
+                    text << " (required)";
                 if (!opt.type.empty())
                     text << " (" << opt.type << ")";
                 if (!opt.default_value.empty())

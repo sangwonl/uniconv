@@ -297,6 +297,68 @@ namespace uniconv::core
         }
     };
 
+    // Plugin option definition (from manifest)
+    struct PluginOptionDef
+    {
+        std::string name; // e.g., "--confidence"
+        std::string type; // "string", "int", "float", "bool"
+        std::string default_value;
+        std::string description;
+        std::optional<double> min_value;
+        std::optional<double> max_value;
+        std::vector<std::string> choices;
+        std::vector<std::string> targets;
+        bool required = false;
+
+        nlohmann::json to_json() const
+        {
+            nlohmann::json j;
+            j["name"] = name;
+            j["type"] = type;
+            if (!default_value.empty())
+                j["default"] = default_value;
+            if (!description.empty())
+                j["description"] = description;
+            if (min_value.has_value())
+                j["min"] = min_value.value();
+            if (max_value.has_value())
+                j["max"] = max_value.value();
+            if (!choices.empty())
+                j["choices"] = choices;
+            if (!targets.empty())
+                j["targets"] = targets;
+            if (required)
+                j["required"] = true;
+            return j;
+        }
+
+        static PluginOptionDef from_json(const nlohmann::json &j)
+        {
+            PluginOptionDef opt;
+            opt.name = j.at("name").get<std::string>();
+            opt.type = j.value("type", "string");
+            if (j.contains("default")) {
+                const auto& val = j.at("default");
+                if (val.is_string()) {
+                    opt.default_value = val.get<std::string>();
+                } else if (!val.is_null()) {
+                    opt.default_value = val.dump();
+                }
+            }
+            opt.description = j.value("description", "");
+            if (j.contains("min") && j.at("min").is_number())
+                opt.min_value = j.at("min").get<double>();
+            if (j.contains("max") && j.at("max").is_number())
+                opt.max_value = j.at("max").get<double>();
+            if (j.contains("choices") && j.at("choices").is_array())
+                opt.choices = j.at("choices").get<std::vector<std::string>>();
+            if (j.contains("targets") && j.at("targets").is_array())
+                opt.targets = j.at("targets").get<std::vector<std::string>>();
+            opt.required = j.value("required", false);
+            return opt;
+        }
+    };
+
     // Plugin information
     struct PluginInfo
     {
@@ -310,6 +372,9 @@ namespace uniconv::core
         std::string description;
         bool builtin = false;
         bool sink = false;          // Sink plugin: owns output, uniconv skips finalization
+
+        // Options
+        std::vector<PluginOptionDef> options;
 
         // Data type information
         std::vector<DataType> input_types;  // Supported input data types
@@ -413,5 +478,52 @@ namespace uniconv::core
             return p;
         }
     };
+
+    // Validate that all required options (with no default) are provided.
+    // Returns an error message string, or empty string if OK.
+    inline std::string validate_required_options(
+        const std::vector<PluginOptionDef> &defs,
+        const std::map<std::string, std::string> &provided,
+        const std::string &target)
+    {
+        for (const auto &opt : defs)
+        {
+            if (!opt.required)
+                continue;
+
+            // If option is scoped to specific targets, skip unless current target matches
+            if (!opt.targets.empty())
+            {
+                bool target_matches = false;
+                for (const auto &t : opt.targets)
+                {
+                    if (t == target)
+                    {
+                        target_matches = true;
+                        break;
+                    }
+                }
+                if (!target_matches)
+                    continue;
+            }
+
+            // If option has a non-empty default, it's already satisfied
+            if (!opt.default_value.empty())
+                continue;
+
+            // Strip leading -- or - from option name for lookup
+            std::string key = opt.name;
+            if (key.starts_with("--"))
+                key = key.substr(2);
+            else if (key.starts_with("-"))
+                key = key.substr(1);
+
+            if (provided.find(key) == provided.end())
+            {
+                return "Required option '" + opt.name + "' was not provided for target '" + target + "'";
+            }
+        }
+        return "";
+    }
 
 } // namespace uniconv::core

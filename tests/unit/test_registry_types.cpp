@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 #include "core/registry_types.h"
 #include "core/plugin_manifest.h"
+#include "core/types.h"
 
 using namespace uniconv::core;
 
@@ -408,4 +409,115 @@ TEST(PluginManifestTest, TargetsMapRoundTrip)
     ASSERT_TRUE(m2.accepts.has_value());
     ASSERT_EQ(m2.accepts->size(), 2);
     EXPECT_EQ((*m2.accepts)[0], "shp");
+}
+
+// ============================================================================
+// Required field tests
+// ============================================================================
+
+TEST(PluginOptionDefTest, RequiredFieldParsing)
+{
+    nlohmann::json j = {
+        {"name", "--api-key"},
+        {"type", "string"},
+        {"required", true}};
+
+    auto opt = PluginOptionDef::from_json(j);
+    EXPECT_TRUE(opt.required);
+}
+
+TEST(PluginOptionDefTest, RequiredFieldDefaultFalse)
+{
+    nlohmann::json j = {
+        {"name", "--quality"},
+        {"type", "int"}};
+
+    auto opt = PluginOptionDef::from_json(j);
+    EXPECT_FALSE(opt.required);
+}
+
+TEST(PluginOptionDefTest, RequiredFieldSerialization)
+{
+    PluginOptionDef opt;
+    opt.name = "--api-key";
+    opt.type = "string";
+    opt.required = true;
+
+    auto j = opt.to_json();
+    ASSERT_TRUE(j.contains("required"));
+    EXPECT_TRUE(j["required"].get<bool>());
+
+    // required: false should be omitted
+    PluginOptionDef opt2;
+    opt2.name = "--quality";
+    opt2.type = "int";
+    opt2.required = false;
+
+    auto j2 = opt2.to_json();
+    EXPECT_FALSE(j2.contains("required"));
+}
+
+TEST(ValidateRequiredOptionsTest, MissingRequired)
+{
+    std::vector<PluginOptionDef> defs;
+    PluginOptionDef opt;
+    opt.name = "--api-key";
+    opt.type = "string";
+    opt.required = true;
+    defs.push_back(opt);
+
+    std::map<std::string, std::string> provided;
+    auto err = validate_required_options(defs, provided, "upload");
+    EXPECT_FALSE(err.empty());
+    EXPECT_NE(err.find("--api-key"), std::string::npos);
+}
+
+TEST(ValidateRequiredOptionsTest, ProvidedRequired)
+{
+    std::vector<PluginOptionDef> defs;
+    PluginOptionDef opt;
+    opt.name = "--api-key";
+    opt.type = "string";
+    opt.required = true;
+    defs.push_back(opt);
+
+    std::map<std::string, std::string> provided = {{"api-key", "abc123"}};
+    auto err = validate_required_options(defs, provided, "upload");
+    EXPECT_TRUE(err.empty());
+}
+
+TEST(ValidateRequiredOptionsTest, RequiredWithDefault)
+{
+    std::vector<PluginOptionDef> defs;
+    PluginOptionDef opt;
+    opt.name = "--format";
+    opt.type = "string";
+    opt.required = true;
+    opt.default_value = "json";
+    defs.push_back(opt);
+
+    std::map<std::string, std::string> provided;
+    auto err = validate_required_options(defs, provided, "extract");
+    EXPECT_TRUE(err.empty());
+}
+
+TEST(ValidateRequiredOptionsTest, RequiredTargetScoped)
+{
+    std::vector<PluginOptionDef> defs;
+    PluginOptionDef opt;
+    opt.name = "--delay";
+    opt.type = "int";
+    opt.required = true;
+    opt.targets = {"gif"};
+    defs.push_back(opt);
+
+    // Target is "mp4" — option scoped to "gif" only, so no error
+    std::map<std::string, std::string> provided;
+    auto err = validate_required_options(defs, provided, "mp4");
+    EXPECT_TRUE(err.empty());
+
+    // Target is "gif" — option is required and missing
+    auto err2 = validate_required_options(defs, provided, "gif");
+    EXPECT_FALSE(err2.empty());
+    EXPECT_NE(err2.find("--delay"), std::string::npos);
 }

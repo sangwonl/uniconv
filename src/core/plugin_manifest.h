@@ -76,64 +76,6 @@ namespace uniconv::core
         }
     };
 
-    // Plugin option definition (from manifest)
-    struct PluginOptionDef
-    {
-        std::string name; // e.g., "--confidence"
-        std::string type; // "string", "int", "float", "bool"
-        std::string default_value;
-        std::string description;
-        std::optional<double> min_value;
-        std::optional<double> max_value;
-        std::vector<std::string> choices;
-        std::vector<std::string> targets;
-
-        nlohmann::json to_json() const
-        {
-            nlohmann::json j;
-            j["name"] = name;
-            j["type"] = type;
-            if (!default_value.empty())
-                j["default"] = default_value;
-            if (!description.empty())
-                j["description"] = description;
-            if (min_value.has_value())
-                j["min"] = min_value.value();
-            if (max_value.has_value())
-                j["max"] = max_value.value();
-            if (!choices.empty())
-                j["choices"] = choices;
-            if (!targets.empty())
-                j["targets"] = targets;
-            return j;
-        }
-
-        static PluginOptionDef from_json(const nlohmann::json &j)
-        {
-            PluginOptionDef opt;
-            opt.name = j.at("name").get<std::string>();
-            opt.type = j.value("type", "string");
-            if (j.contains("default")) {
-                const auto& val = j.at("default");
-                if (val.is_string()) {
-                    opt.default_value = val.get<std::string>();
-                } else if (!val.is_null()) {
-                    opt.default_value = val.dump();
-                }
-            }
-            opt.description = j.value("description", "");
-            if (j.contains("min") && j.at("min").is_number())
-                opt.min_value = j.at("min").get<double>();
-            if (j.contains("max") && j.at("max").is_number())
-                opt.max_value = j.at("max").get<double>();
-            if (j.contains("choices") && j.at("choices").is_array())
-                opt.choices = j.at("choices").get<std::vector<std::string>>();
-            if (j.contains("targets") && j.at("targets").is_array())
-                opt.targets = j.at("targets").get<std::vector<std::string>>();
-            return opt;
-        }
-    };
-
     // Plugin manifest - loaded from plugin.json
     struct PluginManifest
     {
@@ -319,6 +261,7 @@ namespace uniconv::core
             info.version = version;
             info.description = description;
             info.target_input_formats = target_input_formats;
+            info.options = options;
             info.builtin = false;
             return info;
         }

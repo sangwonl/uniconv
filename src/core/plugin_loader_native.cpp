@@ -130,6 +130,8 @@ namespace uniconv::core
         }
         // else: stays nullopt → accept all
 
+        cached_info_.options = manifest_.options;
+
         info_cached_ = true;
         return cached_info_;
     }
