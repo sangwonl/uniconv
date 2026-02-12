@@ -1085,25 +1085,6 @@ namespace uniconv::core
         return target_to_extension(node.target);
     }
 
-    // Known file format extensions
-    static const std::vector<std::string> known_file_formats = {
-        // Image formats
-        "jpg", "jpeg", "png", "gif", "bmp", "tiff", "tif", "webp", "heic", "heif",
-        "ico", "svg", "raw", "cr2", "nef", "arw",
-        // Video formats
-        "mp4", "avi", "mkv", "mov", "wmv", "flv", "webm", "m4v", "mpeg", "mpg",
-        "3gp", "ogv",
-        // Audio formats
-        "mp3", "wav", "flac", "aac", "ogg", "wma", "m4a", "opus",
-        // Document formats
-        "pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "odt", "ods", "odp",
-        // Text formats
-        "txt", "md", "json", "xml", "csv", "html", "htm", "yaml", "yml", "log",
-        "text", "rtf",
-        // Archive formats
-        "zip", "tar", "gz", "bz2", "xz", "7z", "tgz", "tbz2", "txz",
-        "tar-gz", "tar-bz2", "tar-xz"};
-
     bool PipelineExecutor::is_clipboard_content_copyable(const std::string &target)
     {
         // Image formats - clipboard can copy actual image data
@@ -1143,12 +1124,8 @@ namespace uniconv::core
                        [](unsigned char c)
                        { return std::tolower(c); });
 
-        for (const auto &fmt : known_file_formats)
-        {
-            if (lower_target == fmt)
-                return true;
-        }
-        return false;
+        auto formats = engine_->plugin_manager().known_formats();
+        return formats.count(lower_target) > 0;
     }
 
     std::string PipelineExecutor::get_output_format(

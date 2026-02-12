@@ -141,7 +141,8 @@ namespace uniconv::core
         static bool is_clipboard_content_copyable(const std::string &target);
 
         // Check if a target is a known file format (vs a transformation like "gray")
-        static bool is_known_file_format(const std::string &target);
+        // Queries plugin manager for dynamically registered formats
+        bool is_known_file_format(const std::string &target);
 
         // Get the actual output format for a node (handles transformations)
         std::string get_output_format(const ExecutionNode &node,

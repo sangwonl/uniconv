@@ -10,6 +10,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <unordered_set>
 #include <vector>
 
 namespace uniconv::core
@@ -64,6 +65,9 @@ namespace uniconv::core
 
         // List plugins that support a specific target
         std::vector<PluginInfo> list_plugins_for_target(const std::string &target) const;
+
+        // Collect all known file format extensions from discovered plugins
+        std::unordered_set<std::string> known_formats() const;
 
         // Get/set default plugin for target
         void set_default(const std::string &target, const std::string &plugin_scope);

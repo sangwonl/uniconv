@@ -284,6 +284,45 @@ namespace uniconv::core
         return result;
     }
 
+    std::unordered_set<std::string> PluginManager::known_formats() const
+    {
+        ensure_discovered();
+
+        std::unordered_set<std::string> formats;
+
+        auto collect_from_targets = [&](const std::map<std::string, std::vector<std::string>> &targets)
+        {
+            for (const auto &[target, extensions] : targets)
+            {
+                if (extensions.empty())
+                {
+                    // Target name IS the file format (e.g., "fgb": [])
+                    formats.insert(to_lower(target));
+                }
+                else
+                {
+                    // Target is a transformation; extensions are the real formats
+                    for (const auto &ext : extensions)
+                    {
+                        formats.insert(to_lower(ext));
+                    }
+                }
+            }
+        };
+
+        for (const auto &plugin : plugins_)
+        {
+            collect_from_targets(plugin->info().targets);
+        }
+
+        for (const auto &m : manifests_)
+        {
+            collect_from_targets(m.targets);
+        }
+
+        return formats;
+    }
+
     void PluginManager::set_default(const std::string &target, const std::string &plugin_scope)
     {
         resolver_.set_default(target, plugin_scope);
