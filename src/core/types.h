@@ -309,6 +309,7 @@ namespace uniconv::core
         std::string version;
         std::string description;
         bool builtin = false;
+        bool sink = false;          // Sink plugin: owns output, uniconv skips finalization
 
         // Data type information
         std::vector<DataType> input_types;  // Supported input data types
@@ -325,6 +326,9 @@ namespace uniconv::core
                 {"version", version},
                 {"description", description},
                 {"builtin", builtin}};
+
+            if (sink)
+                j["sink"] = true;
 
             // Add data type info
             if (!input_types.empty())

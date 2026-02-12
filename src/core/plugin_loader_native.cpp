@@ -107,6 +107,7 @@ namespace uniconv::core
         cached_info_.version = native_info->version ? native_info->version : manifest_.version;
         cached_info_.description = native_info->description ? native_info->description : manifest_.description;
         cached_info_.builtin = false;
+        cached_info_.sink = manifest_.sink;
 
         // Copy targets (native plugins provide flat list, convert to map with empty extensions)
         if (native_info->targets)

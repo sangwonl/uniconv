@@ -146,6 +146,7 @@ namespace uniconv::core
         // Plugin configuration
         std::map<std::string, std::vector<std::string>> targets; // Supported output targets → extensions
         std::vector<std::string> accepts;       // Accepted input formats
+        bool sink = false;                      // Sink plugin: owns output, uniconv skips finalization
         std::map<std::string, std::vector<std::string>> target_input_formats; // Per-target input format overrides
 
         // Data types
@@ -184,6 +185,8 @@ namespace uniconv::core
             j["description"] = description;
             j["targets"] = targets;
             j["accepts"] = accepts;
+            if (sink)
+                j["sink"] = true;
             j["interface"] = plugin_interface_to_string(iface);
             if (!executable.empty())
                 j["executable"] = executable;
@@ -252,6 +255,9 @@ namespace uniconv::core
                 m.accepts = j.at("accepts").get<std::vector<std::string>>();
             }
 
+            // Sink flag
+            m.sink = j.value("sink", false);
+
             if (j.contains("target_input_formats") && j.at("target_input_formats").is_object())
             {
                 m.target_input_formats = j.at("target_input_formats").get<std::map<std::string, std::vector<std::string>>>();
@@ -294,6 +300,7 @@ namespace uniconv::core
             info.scope = scope;
             info.targets = targets;
             info.accepts = accepts;
+            info.sink = sink;
             info.input_types = input_types;
             info.output_types = output_types;
             info.version = version;

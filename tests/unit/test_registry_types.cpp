@@ -279,6 +279,49 @@ TEST(PluginManifestTest, AcceptsField)
     EXPECT_EQ(manifest.accepts[2], "geojson");
 }
 
+TEST(PluginManifestTest, SinkFlag)
+{
+    // Plugin with sink: true
+    nlohmann::json j = {
+        {"name", "cdn-uploader"},
+        {"version", "1.0.0"},
+        {"interface", "cli"},
+        {"executable", "upload.py"},
+        {"targets", {{"upload", nlohmann::json::array()}, {"save", nlohmann::json::array()}}},
+        {"accepts", nlohmann::json::array()},
+        {"sink", true}};
+
+    auto manifest = PluginManifest::from_json(j);
+    EXPECT_TRUE(manifest.sink);
+
+    // to_json includes sink
+    auto out = manifest.to_json();
+    ASSERT_TRUE(out.contains("sink"));
+    EXPECT_TRUE(out["sink"].get<bool>());
+
+    // to_plugin_info propagates sink
+    auto info = manifest.to_plugin_info();
+    EXPECT_TRUE(info.sink);
+}
+
+TEST(PluginManifestTest, SinkFlagDefaultFalse)
+{
+    // Plugin without sink field defaults to false
+    nlohmann::json j = {
+        {"name", "image-convert"},
+        {"version", "1.0.0"},
+        {"interface", "cli"},
+        {"executable", "convert.py"},
+        {"targets", {{"jpg", nlohmann::json::array()}}}};
+
+    auto manifest = PluginManifest::from_json(j);
+    EXPECT_FALSE(manifest.sink);
+
+    // to_json omits sink when false
+    auto out = manifest.to_json();
+    EXPECT_FALSE(out.contains("sink"));
+}
+
 TEST(PluginManifestTest, TargetsMapRoundTrip)
 {
     PluginManifest m;

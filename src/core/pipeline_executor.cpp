@@ -331,8 +331,13 @@ namespace uniconv::core
     {
         node.input = get_node_input(node, graph);
 
-        // Resolve extension for file naming
+        // Resolve extension and sink flag from plugin
         node.resolved_extension = resolve_extension(node);
+        auto *resolved_plugin = engine_->plugin_manager().find_plugin(node.target, node.plugin);
+        if (resolved_plugin)
+        {
+            node.is_sink = resolved_plugin->info().sink;
+        }
 
         // Report progress: stage started
         if (output)
@@ -342,11 +347,15 @@ namespace uniconv::core
 
         auto node_start = std::chrono::steady_clock::now();
 
-        // Always output to temp during execution phase
-        node.temp_output = generate_temp_path(
-            node.resolved_extension,
-            node.stage_idx,
-            node.element_idx);
+        // Sink plugins own their output — don't generate a temp path for them.
+        // Pass the input directly and let the plugin decide where to write.
+        if (!node.is_sink)
+        {
+            node.temp_output = generate_temp_path(
+                node.resolved_extension,
+                node.stage_idx,
+                node.element_idx);
+        }
 
         // Build request
         Request request;
@@ -354,7 +363,10 @@ namespace uniconv::core
         request.target = node.target;
         request.plugin = node.plugin;
         request.core_options = pipeline.core_options;
-        request.core_options.output = node.temp_output;
+        if (!node.is_sink)
+        {
+            request.core_options.output = node.temp_output;
+        }
         request.plugin_options = node.plugin_options;
 
         // For temp files from previous stages, use extension as format hint
@@ -381,7 +393,16 @@ namespace uniconv::core
         auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(node_end - node_start).count();
 
         // Use actual output from plugin if available
-        std::filesystem::path actual_output = etl_result.output.value_or(node.temp_output);
+        std::filesystem::path actual_output;
+        if (node.is_sink)
+        {
+            // Sink plugins own their output — use whatever they report
+            actual_output = etl_result.output.value_or("");
+        }
+        else
+        {
+            actual_output = etl_result.output.value_or(node.temp_output);
+        }
         node.temp_output = actual_output;
         node.plugin_used = etl_result.plugin_used;
         node.executed = true;
@@ -417,6 +438,18 @@ namespace uniconv::core
             return false;
         }
 
+        // Sink node: record plugin's output as final (skip finalization)
+        if (node.is_sink)
+        {
+            node.final_output = actual_output;
+            if (!actual_output.empty())
+            {
+                result.final_outputs.push_back(actual_output);
+            }
+            node.status = ResultStatus::Success;
+            return true;
+        }
+
         // Detect scatter result: plugin returned "outputs" array (1→N)
         if (etl_result.is_scatter())
         {
@@ -438,8 +471,13 @@ namespace uniconv::core
         size_t total_nodes,
         PipelineResult &result)
     {
-        // Resolve extension for file naming
+        // Resolve extension and sink flag from plugin
         node.resolved_extension = resolve_extension(node);
+        auto *resolved_plugin = engine_->plugin_manager().find_plugin(node.target, node.plugin);
+        if (resolved_plugin)
+        {
+            node.is_sink = resolved_plugin->info().sink;
+        }
 
         // Execute the conversion once for each scattered input
         std::vector<std::filesystem::path> new_scattered_paths;
@@ -459,9 +497,13 @@ namespace uniconv::core
 
             auto scatter_start = std::chrono::steady_clock::now();
 
-            // Generate a unique temp path for this scatter index
-            auto temp_output = generate_scatter_temp_path(
-                node.resolved_extension, node.stage_idx, node.element_idx, i);
+            // Generate a unique temp path for this scatter index (skip for sink)
+            std::filesystem::path temp_output;
+            if (!node.is_sink)
+            {
+                temp_output = generate_scatter_temp_path(
+                    node.resolved_extension, node.stage_idx, node.element_idx, i);
+            }
 
             // Build request
             Request request;
@@ -469,7 +511,10 @@ namespace uniconv::core
             request.target = node.target;
             request.plugin = node.plugin;
             request.core_options = pipeline.core_options;
-            request.core_options.output = temp_output;
+            if (!node.is_sink)
+            {
+                request.core_options.output = temp_output;
+            }
             request.plugin_options = node.plugin_options;
 
             // Format hint for temp files
@@ -489,7 +534,15 @@ namespace uniconv::core
             auto duration = std::chrono::duration_cast<std::chrono::milliseconds>(
                                 scatter_end - scatter_start).count();
 
-            std::filesystem::path actual_output = etl_result.output.value_or(temp_output);
+            std::filesystem::path actual_output;
+            if (node.is_sink)
+            {
+                actual_output = etl_result.output.value_or("");
+            }
+            else
+            {
+                actual_output = etl_result.output.value_or(temp_output);
+            }
 
             bool success = (etl_result.status == ResultStatus::Success);
             std::string error_msg = etl_result.error.value_or("");
@@ -523,6 +576,20 @@ namespace uniconv::core
             }
 
             new_scattered_paths.push_back(actual_output);
+        }
+
+        // Sink node: record all plugin outputs as final (skip finalization)
+        if (node.is_sink)
+        {
+            for (const auto &p : new_scattered_paths)
+            {
+                if (!p.empty())
+                    result.final_outputs.push_back(p);
+            }
+            node.plugin_used = "";
+            node.executed = true;
+            node.status = ResultStatus::Success;
+            return true;
         }
 
         // Update scattered paths for next stage
@@ -581,6 +648,13 @@ namespace uniconv::core
                     if (!has_output_option && !clipboard_has_save)
                     {
                         std::string output_format = get_output_format(node, graph);
+                        if (output_format.empty())
+                        {
+                            result.error = "No output format could be determined for target '" +
+                                           node.target + "'; the plugin produced no usable output";
+                            result.success = false;
+                            return false;
+                        }
                         result.error = "clipboard cannot copy '" + output_format +
                                        "' content directly; use -o or --save to save the file";
                         result.success = false;
@@ -601,6 +675,13 @@ namespace uniconv::core
                 // This node produced multiple outputs via scatter or scattered execution.
                 // Each scattered output becomes a final output.
                 std::string output_format = get_output_format(node, graph);
+                if (output_format.empty())
+                {
+                    result.error = "No output format could be determined for target '" +
+                                   node.target + "'; the plugin produced no usable output";
+                    result.success = false;
+                    return false;
+                }
                 std::string transform = is_known_file_format(node.target) ? "" : node.target;
 
                 // Determine output directory
@@ -697,6 +778,13 @@ namespace uniconv::core
             {
                 // Terminal node or node that only feeds clipboard - this is a "final" output
                 std::string output_format = get_output_format(node, graph);
+                if (output_format.empty())
+                {
+                    result.error = "No output format could be determined for target '" +
+                                   node.target + "'; the plugin produced no usable output";
+                    result.success = false;
+                    return false;
+                }
 
                 // If target is a transformation (not a file format), use it as suffix
                 std::string transform = is_known_file_format(node.target) ? "" : node.target;
@@ -1065,21 +1153,23 @@ namespace uniconv::core
 
     std::string PipelineExecutor::get_output_format(
         const ExecutionNode &node,
-        const ExecutionGraph &graph)
+        const ExecutionGraph & /*graph*/)
     {
-        // If resolved_extension is set and is a known format, prefer it
+        // The last plugin owns the output. uniconv never walks back to the original input.
+
+        // 1. Resolved extension (from user's explicit .ext or plugin's targets map)
         if (!node.resolved_extension.empty() && is_known_file_format(node.resolved_extension))
         {
             return node.resolved_extension;
         }
 
-        // If target is a known file format, use it
+        // 2. Target is itself a known file format (converter-type plugins)
         if (is_known_file_format(node.target))
         {
             return node.target;
         }
 
-        // Check the actual output file's extension from the plugin
+        // 3. Plugin's reported output path extension
         if (!node.temp_output.empty())
         {
             std::string out_ext = node.temp_output.extension().string();
@@ -1089,33 +1179,8 @@ namespace uniconv::core
                 return out_ext;
         }
 
-        // Otherwise, target is a transformation (e.g., "gray", "resize")
-        // Use the input file's format
-        std::filesystem::path input_path = node.input;
-        if (input_path.empty() && !node.input_nodes.empty())
-        {
-            const auto &pred = graph.node(node.input_nodes[0]);
-            input_path = pred.temp_output;
-        }
-        if (input_path.empty())
-        {
-            input_path = graph.source();
-        }
-
-        std::string ext = input_path.extension().string();
-        if (!ext.empty() && ext[0] == '.')
-            ext = ext.substr(1);
-
-        // If extension is a known format, use it; otherwise fallback to source
-        if (!ext.empty() && is_known_file_format(ext))
-            return ext;
-
-        // Final fallback: original source extension
-        ext = graph.source().extension().string();
-        if (!ext.empty() && ext[0] == '.')
-            ext = ext.substr(1);
-
-        return ext;
+        // No meaningful output format — caller must handle this as an error
+        return "";
     }
 
 } // namespace uniconv::core

@@ -39,6 +39,7 @@ struct ExecutionNode {
     bool is_collect = false;
     bool is_clipboard = false;
     bool is_passthrough = false;
+    bool is_sink = false;           // Plugin owns output, skip finalization
 
     // Scatter/collect state
     std::vector<std::filesystem::path> scatter_outputs;  // Populated at runtime when plugin returns "outputs"
@@ -53,7 +54,7 @@ struct ExecutionNode {
     bool is_terminal() const { return output_nodes.empty(); }
     // Only conversion nodes produce new files
     // tee, clipboard, collect, and passthrough do not produce new files
-    bool has_file_output() const { return !is_tee && !is_collect && !is_clipboard && !is_passthrough; }
+    bool has_file_output() const { return !is_tee && !is_collect && !is_clipboard && !is_passthrough && !is_sink; }
 };
 
 // The execution graph tracks all nodes and their relationships
