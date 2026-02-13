@@ -217,15 +217,15 @@ namespace uniconv::cli::commands
         std::ostringstream text;
         text << "PLUGINS\n";
         text << std::left
-             << std::setw(25) << "NAME"
+             << std::setw(30) << "NAME"
              << std::setw(10) << "VERSION"
              << std::setw(12) << "INTERFACE"
              << "DESCRIPTION\n";
-        text << std::string(80, '-') << "\n";
+        text << std::string(85, '-') << "\n";
 
         for (const auto &entry : index->plugins)
         {
-            std::string name_col = entry.name;
+            std::string name_col = entry.id();
             if (installed_.is_registry_installed(entry.name))
             {
                 name_col += " [installed]";
@@ -236,7 +236,7 @@ namespace uniconv::cli::commands
                 desc = desc.substr(0, 32) + "...";
 
             text << std::left
-                 << std::setw(25) << name_col
+                 << std::setw(30) << name_col
                  << std::setw(10) << entry.latest
                  << std::setw(12) << entry.iface
                  << desc << "\n";
@@ -1044,11 +1044,11 @@ namespace uniconv::cli::commands
 
         std::ostringstream text;
         text << std::left
-             << std::setw(25) << "NAME"
+             << std::setw(30) << "NAME"
              << std::setw(10) << "VERSION"
              << std::setw(15) << "AUTHOR"
              << "DESCRIPTION\n";
-        text << std::string(80, '-') << "\n";
+        text << std::string(90, '-') << "\n";
 
         for (const auto &entry : results)
         {
@@ -1058,7 +1058,7 @@ namespace uniconv::cli::commands
                 desc = desc.substr(0, 37) + "...";
 
             text << std::left
-                 << std::setw(25) << entry.name
+                 << std::setw(30) << entry.id()
                  << std::setw(10) << entry.latest
                  << std::setw(15) << entry.author
                  << desc << "\n";

@@ -175,6 +175,7 @@ TEST(RegistryPluginEntryTest, RoundTrip)
 {
     RegistryPluginEntry e;
     e.name = "image-grayscale";
+    e.scope = "somedev";
     e.description = "Convert to grayscale";
     e.author = "somedev";
     e.license = "MIT";
@@ -190,6 +191,7 @@ TEST(RegistryPluginEntryTest, RoundTrip)
     auto e2 = RegistryPluginEntry::from_json(j);
 
     EXPECT_EQ(e.name, e2.name);
+    EXPECT_EQ(e.scope, e2.scope);
     EXPECT_EQ(e.description, e2.description);
     EXPECT_EQ(e.author, e2.author);
     EXPECT_EQ(e.license, e2.license);
@@ -197,6 +199,29 @@ TEST(RegistryPluginEntryTest, RoundTrip)
     EXPECT_EQ(e.keywords, e2.keywords);
     ASSERT_EQ(e2.releases.size(), 1);
     EXPECT_EQ(e2.releases[0].version, "1.0.0");
+}
+
+TEST(RegistryPluginEntryTest, ScopeDefaultsToEmpty)
+{
+    nlohmann::json j = {
+        {"name", "image-grayscale"},
+        {"description", "Convert to grayscale"}};
+
+    auto e = RegistryPluginEntry::from_json(j);
+    EXPECT_EQ(e.scope, "");
+    EXPECT_EQ(e.id(), "image-grayscale");
+}
+
+TEST(RegistryPluginEntryTest, ScopeEqualsNameNormalizesToEmpty)
+{
+    nlohmann::json j = {
+        {"name", "archive"},
+        {"scope", "archive"},
+        {"description", "Archive conversion"}};
+
+    auto e = RegistryPluginEntry::from_json(j);
+    EXPECT_EQ(e.scope, "");
+    EXPECT_EQ(e.id(), "archive");
 }
 
 TEST(RegistryIndexTest, RoundTrip)
@@ -207,6 +232,7 @@ TEST(RegistryIndexTest, RoundTrip)
 
     RegistryIndexEntry entry;
     entry.name = "image-grayscale";
+    entry.scope = "somedev";
     entry.description = "Convert to grayscale";
     entry.keywords = {"image"};
     entry.latest = "1.0.0";
@@ -221,7 +247,31 @@ TEST(RegistryIndexTest, RoundTrip)
     EXPECT_EQ(idx.updated_at, idx2.updated_at);
     ASSERT_EQ(idx2.plugins.size(), 1);
     EXPECT_EQ(idx2.plugins[0].name, "image-grayscale");
+    EXPECT_EQ(idx2.plugins[0].scope, "somedev");
     EXPECT_EQ(idx2.plugins[0].latest, "1.0.0");
+}
+
+TEST(RegistryIndexEntryTest, ScopeDefaultsToEmpty)
+{
+    nlohmann::json j = {
+        {"name", "image-grayscale"},
+        {"latest", "1.0.0"}};
+
+    auto e = RegistryIndexEntry::from_json(j);
+    EXPECT_EQ(e.scope, "");
+    EXPECT_EQ(e.id(), "image-grayscale");
+}
+
+TEST(RegistryIndexEntryTest, ScopeEqualsNameNormalizesToEmpty)
+{
+    nlohmann::json j = {
+        {"name", "archive"},
+        {"scope", "archive"},
+        {"latest", "1.0.0"}};
+
+    auto e = RegistryIndexEntry::from_json(j);
+    EXPECT_EQ(e.scope, "");
+    EXPECT_EQ(e.id(), "archive");
 }
 
 TEST(InstalledPluginRecordTest, RoundTrip)

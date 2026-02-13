@@ -95,6 +95,7 @@ namespace uniconv::core
     struct RegistryPluginEntry
     {
         std::string name;
+        std::string scope;
         std::string description;
         std::string author;
         std::string license;
@@ -102,10 +103,18 @@ namespace uniconv::core
         std::vector<std::string> keywords;
         std::vector<RegistryRelease> releases;
 
+        std::string id() const
+        {
+            if (scope.empty() || scope == "uniconv" || scope == name)
+                return name;
+            return scope + "/" + name;
+        }
+
         nlohmann::json to_json() const
         {
             nlohmann::json j;
             j["name"] = name;
+            j["scope"] = scope;
             j["description"] = description;
             j["author"] = author;
             j["license"] = license;
@@ -125,6 +134,8 @@ namespace uniconv::core
         {
             RegistryPluginEntry e;
             e.name = j.at("name").get<std::string>();
+            auto raw_scope = j.value("scope", std::string{});
+            e.scope = (raw_scope == e.name) ? "" : raw_scope;
             e.description = j.value("description", "");
             e.author = j.value("author", "");
             e.license = j.value("license", "");
@@ -151,16 +162,25 @@ namespace uniconv::core
     struct RegistryIndexEntry
     {
         std::string name;
+        std::string scope;
         std::string description;
         std::vector<std::string> keywords;
         std::string latest;
         std::string author;
         std::string iface;
 
+        std::string id() const
+        {
+            if (scope.empty() || scope == "uniconv" || scope == name)
+                return name;
+            return scope + "/" + name;
+        }
+
         nlohmann::json to_json() const
         {
             return {
                 {"name", name},
+                {"scope", scope},
                 {"description", description},
                 {"keywords", keywords},
                 {"latest", latest},
@@ -172,6 +192,8 @@ namespace uniconv::core
         {
             RegistryIndexEntry e;
             e.name = j.at("name").get<std::string>();
+            auto raw_scope = j.value("scope", std::string{});
+            e.scope = (raw_scope == e.name) ? "" : raw_scope;
             e.description = j.value("description", "");
             e.latest = j.value("latest", "");
             e.author = j.value("author", "");
